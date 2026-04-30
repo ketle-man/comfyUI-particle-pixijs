@@ -90,27 +90,39 @@ export const FILTER_CATALOG = {
 };
 
 // ---- エクスポート: ライブラリを開く ----
-export function openFilterLibrary({ mainCanvas, filterSettings, particleSettings, onPreview, onSave }) {
+export function openFilterLibrary({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview }) {
   if (document.getElementById("filter-lib-modal")) return;
   document.body.appendChild(
-    buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave })
+    buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview })
   );
 }
 
 // ================================================================
 // モーダル構築
 // ================================================================
-function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave }) {
+function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview }) {
   const origSettings = JSON.parse(JSON.stringify(filterSettings));
   let   tempSettings = JSON.parse(JSON.stringify(filterSettings));
 
+  const _defMotion = { turbulence: 0, turbFreq: 1, windX: 0, windY: 0, swirl: 0 };
   const origParticle = {
-    textureUrl:     particleSettings?.textureUrl     ?? null,
-    textureName:    particleSettings?.textureName    ?? null,
+    textures: (function() {
+      if (particleSettings?.textures?.length) return JSON.parse(JSON.stringify(particleSettings.textures));
+      if (particleSettings?.textureUrl) return [{ url: particleSettings.textureUrl, name: particleSettings.textureName ?? "texture" }];
+      return [];
+    })(),
+    size:           particleSettings?.size           ?? 5.0,
+    spread:         particleSettings?.spread         ?? 1.0,
     rotation:       particleSettings?.rotation       ?? 0,
     randomRotation: particleSettings?.randomRotation ?? false,
+    randomScale:    particleSettings?.randomScale    ?? false,
+    shapePreset:    particleSettings?.shapePreset    ?? "default",
+    randomShape:    particleSettings?.randomShape    ?? false,
+    motionParams:   { ..._defMotion, ...(particleSettings?.motionParams ?? {}) },
+    globalStrength: particleSettings?.globalStrength ?? 1.0,
   };
-  let tempParticle = { ...origParticle };
+  let tempParticle = JSON.parse(JSON.stringify(origParticle));
+  const notifyParticle = () => onParticlePreview?.(JSON.parse(JSON.stringify(tempParticle)));
 
   let currentKey        = tempSettings.type || "none";
   let particleFileInput = null;
@@ -179,7 +191,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   const particleItem = el("div", {
     style: "padding:7px 12px;cursor:pointer;font-size:12px;transition:background 0.1s;" +
            "border-left:3px solid transparent;user-select:none;",
-  }, t("textureRotation"));
+  }, t("particleLabel"));
   particleItem.addEventListener("mouseenter", () => {
     if (currentKey !== "particle_settings") particleItem.style.background = "#252545";
   });
@@ -188,6 +200,19 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   });
   particleItem.addEventListener("click", () => selectParticle());
   leftPanel.appendChild(particleItem);
+
+  const particleParamsItem = el("div", {
+    style: "padding:7px 12px;cursor:pointer;font-size:12px;transition:background 0.1s;" +
+           "border-left:3px solid transparent;user-select:none;",
+  }, t("particleParams"));
+  particleParamsItem.addEventListener("mouseenter", () => {
+    if (currentKey !== "particle_params") particleParamsItem.style.background = "#252545";
+  });
+  particleParamsItem.addEventListener("mouseleave", () => {
+    if (currentKey !== "particle_params") particleParamsItem.style.background = "";
+  });
+  particleParamsItem.addEventListener("click", () => selectParticleParams());
+  leftPanel.appendChild(particleParamsItem);
 
   function highlightList(activeKey) {
     for (const [k, item] of Object.entries(filterItems)) {
@@ -200,6 +225,10 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     particleItem.style.background      = pSel ? "#2a2a5a" : "";
     particleItem.style.borderLeftColor = pSel ? "#da8a4a" : "transparent";
     particleItem.style.color           = pSel ? "#ffccaa" : "#ccc";
+    const ppSel = activeKey === "particle_params";
+    particleParamsItem.style.background      = ppSel ? "#2a2a5a" : "";
+    particleParamsItem.style.borderLeftColor = ppSel ? "#da8a4a" : "transparent";
+    particleParamsItem.style.color           = ppSel ? "#ffccaa" : "#ccc";
   }
 
   // ── 中央パネル: プレビュー ──
@@ -321,53 +350,120 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     }
   }
 
-  // ---- パーティクル設定パネル ----
+  // ---- パーティクル設定パネル（テクスチャ＋シェイプ） ----
+  const SHAPE_LIST = [
+    { id: "circle_outline",   label: "◯" },
+    { id: "circle_fill",      label: "●" },
+    { id: "square_outline",   label: "□" },
+    { id: "square_fill",      label: "■" },
+    { id: "triangle_outline", label: "△" },
+    { id: "triangle_fill",    label: "▲" },
+    { id: "star_outline",     label: "☆" },
+    { id: "star_fill",        label: "★" },
+  ];
+
   function buildParticleParamPanel() {
     rightPanel.replaceChildren();
 
     rightPanel.appendChild(el("div", {
       style: "font-size:14px;font-weight:bold;color:#ffccaa;padding-bottom:5px;" +
              "border-bottom:1px solid #333;margin-bottom:4px;",
-    }, t("textureRotation")));
+    }, t("particleLabel")));
     rightPanel.appendChild(el("div", {
       style: "font-size:11px;color:#778;margin-bottom:12px;",
-    }, t("particleSettingsDesc")));
+    }, t("particleShapeDesc")));
 
-    // ---- テクスチャ ----
+    // ---- テクスチャ（複数） ----
     rightPanel.appendChild(
       el("div", { style: "font-size:11px;color:#99a;margin-bottom:5px;" }, t("textureImage"))
     );
-
-    const texNameEl = el("div", {
-      style: "font-size:11px;color:#aaa;padding:4px 6px;background:#111;border:1px solid #333;" +
-             "border-radius:4px;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
-    }, tempParticle.textureName ?? (tempParticle.textureUrl ? t("customTexture") : t("defaultTexture")));
-
-    const texPreviewImg = document.createElement("img");
-    texPreviewImg.style.cssText =
-      "width:64px;height:64px;object-fit:contain;border:1px solid #333;border-radius:4px;" +
-      "margin-bottom:6px;background:#111;display:" + (tempParticle.textureUrl ? "block" : "none") + ";";
-    if (tempParticle.textureUrl) texPreviewImg.src = tempParticle.textureUrl;
 
     if (!particleFileInput) {
       particleFileInput = document.createElement("input");
       particleFileInput.type    = "file";
       particleFileInput.accept  = "image/*";
+      particleFileInput.multiple = true;
       particleFileInput.style.display = "none";
       dialog.appendChild(particleFileInput);
     }
-    particleFileInput.onchange = () => {
-      const file = particleFileInput.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        tempParticle.textureUrl  = ev.target.result;
-        tempParticle.textureName = file.name;
-        texNameEl.textContent    = file.name;
-        texPreviewImg.src        = ev.target.result;
-        texPreviewImg.style.display = "block";
+
+    // テクスチャリスト本体（overflow なし・高さ自動）
+    const texListEl = el("div", { style: "margin-bottom:6px;" });
+
+    function drawThumb(canvas, url) {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      // プレースホルダー色を先に塗る
+      ctx.fillStyle = "#2a2a3a";
+      ctx.fillRect(0, 0, 28, 28);
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, 28, 28);
+        const s = Math.min(28 / img.width, 28 / img.height);
+        const w = img.width * s, h = img.height * s;
+        ctx.drawImage(img, (28 - w) / 2, (28 - h) / 2, w, h);
       };
-      reader.readAsDataURL(file);
+      img.onerror = () => {
+        ctx.fillStyle = "#555";
+        ctx.font = "bold 16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("?", 14, 14);
+      };
+      img.src = url;
+    }
+
+    function refreshTexList() {
+      texListEl.replaceChildren();
+      if (tempParticle.textures.length === 0) {
+        texListEl.appendChild(el("div", {
+          style: "font-size:11px;color:#778;padding:4px 0;",
+        }, t("defaultTexture")));
+        return;
+      }
+      for (let i = 0; i < tempParticle.textures.length; i++) {
+        const item = tempParticle.textures[i];
+        const row = el("div", {
+          style: "display:flex;align-items:center;gap:6px;padding:3px 0;" +
+                 "border-bottom:1px solid #2a2a3a;",
+        });
+        const thumb = document.createElement("canvas");
+        thumb.width = 28; thumb.height = 28;
+        thumb.style.cssText =
+          "display:block;width:28px;height:28px;flex-shrink:0;" +
+          "border:1px solid #444;border-radius:2px;";
+        if (item.url) drawThumb(thumb, item.url);
+        const nameEl = el("span", {
+          style: "font-size:11px;color:#bbb;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
+        }, item.name);
+        const delBtn = el("button", {
+          style: "background:#4a2a2a;border:1px solid #6a3a3a;color:#f88;border-radius:3px;" +
+                 "cursor:pointer;font-size:11px;padding:1px 6px;flex-shrink:0;line-height:1.4;",
+        }, "×");
+        delBtn.onclick = () => {
+          tempParticle.textures.splice(i, 1);
+          refreshTexList();
+          notifyParticle();
+        };
+        row.append(thumb, nameEl, delBtn);
+        texListEl.appendChild(row);
+      }
+    }
+    refreshTexList();
+
+    particleFileInput.onchange = () => {
+      const files = Array.from(particleFileInput.files ?? []);
+      if (!files.length) return;
+      let loaded = 0;
+      for (const file of files) {
+        const reader = new FileReader();
+        reader.onload = ev => {
+          tempParticle.textures.push({ url: ev.target.result, name: file.name });
+          loaded++;
+          if (loaded === files.length) { refreshTexList(); notifyParticle(); }
+        };
+        reader.readAsDataURL(file);
+      }
       particleFileInput.value = "";
     };
 
@@ -376,17 +472,216 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     texSelBtn.onclick = () => particleFileInput.click();
     const texClrBtn  = mkBtn(t("resetDefault"), "#383838");
     texClrBtn.onclick = () => {
-      tempParticle.textureUrl  = null;
-      tempParticle.textureName = null;
-      texNameEl.textContent    = t("defaultTexture");
-      texPreviewImg.src        = "";
-      texPreviewImg.style.display = "none";
+      tempParticle.textures = [];
+      refreshTexList();
+      notifyParticle();
     };
     texBtnRow.append(texSelBtn, texClrBtn);
+    rightPanel.append(texListEl, texBtnRow);
 
-    rightPanel.append(texNameEl, texPreviewImg, texBtnRow);
+    // ---- プリセットシェイプ ----
+    rightPanel.appendChild(
+      el("div", { style: "font-size:11px;color:#99a;margin-bottom:6px;" }, t("particleShapePreset"))
+    );
 
-    // ---- 回転角度 ----
+    const shapeGrid = el("div", {
+      style: "display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:10px;",
+    });
+
+    const allShapeItems = [{ id: "default", label: t("shapeDefault") }, ...SHAPE_LIST];
+    const shapeBtns = {};
+
+    function updateShapeButtons() {
+      for (const [id, btn] of Object.entries(shapeBtns)) {
+        const sel = id === tempParticle.shapePreset;
+        btn.style.background   = sel ? "#4a5a8a" : "#2a2a3a";
+        btn.style.borderColor  = sel ? "#6a8adb" : "#333";
+        btn.style.color        = sel ? "#ffffff" : "#aaa";
+      }
+    }
+
+    for (const { id, label } of allShapeItems) {
+      const btn = el("button", {
+        style: "padding:5px 2px;background:#2a2a3a;color:#aaa;border:1px solid #333;" +
+               "border-radius:4px;cursor:pointer;font-size:14px;text-align:center;" +
+               "transition:background 0.1s;",
+      }, label);
+      btn.addEventListener("click", () => {
+        tempParticle.shapePreset = id;
+        updateShapeButtons();
+        notifyParticle();
+      });
+      shapeBtns[id] = btn;
+      shapeGrid.appendChild(btn);
+    }
+    updateShapeButtons();
+    rightPanel.appendChild(shapeGrid);
+
+    // ---- ランダムシェイプ ----
+    const randShapeWrap = el("div", { style: "margin-bottom:10px;" });
+    const randShapeRow  = el("div", { style: "display:flex;align-items:center;gap:8px;" });
+    const randShapeChk  = document.createElement("input");
+    randShapeChk.type    = "checkbox";
+    randShapeChk.checked = tempParticle.randomShape;
+    randShapeChk.style.cssText = "width:16px;height:16px;cursor:pointer;accent-color:#4a90d9;flex-shrink:0;";
+    randShapeChk.addEventListener("change", () => { tempParticle.randomShape = randShapeChk.checked; notifyParticle(); });
+    randShapeRow.append(
+      randShapeChk,
+      el("span", { style: "font-size:12px;color:#ccc;line-height:1.4;" }, t("randomShapeDesc"))
+    );
+    randShapeWrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:6px;" }, t("randomShape")));
+    randShapeWrap.appendChild(randShapeRow);
+    rightPanel.appendChild(randShapeWrap);
+
+    // ---- モーション設定 ----
+    rightPanel.appendChild(el("div", {
+      style: "font-size:12px;font-weight:bold;color:#aac8ff;margin-top:14px;margin-bottom:8px;" +
+             "border-top:1px solid #2a2a4a;padding-top:10px;",
+    }, t("motionSettings")));
+
+    const MOTION_PARAMS_DEF = [
+      { key: "turbulence", labelKey: "paramTurbulence", min: 0,    max: 5,    step: 0.1, def: 0 },
+      { key: "turbFreq",   labelKey: "paramTurbFreq",   min: 0.1,  max: 10,   step: 0.1, def: 1 },
+      { key: "windX",      labelKey: "paramWindX",       min: -200, max: 200,  step: 1,   def: 0 },
+      { key: "windY",      labelKey: "paramWindY",       min: -200, max: 200,  step: 1,   def: 0 },
+      { key: "swirl",      labelKey: "paramSwirl",       min: -5,   max: 5,    step: 0.1, def: 0 },
+    ];
+
+    if (!tempParticle.motionParams) tempParticle.motionParams = { ..._defMotion };
+
+    for (const p of MOTION_PARAMS_DEF) {
+      const rowWrap = el("div", { style: "margin-bottom:10px;" });
+      rowWrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:3px;" }, t(p.labelKey)));
+      const slRow = el("div", { style: "display:flex;align-items:center;gap:6px;" });
+
+      const curVal = tempParticle.motionParams[p.key] ?? p.def;
+      const dec = p.step < 0.1 ? 2 : (p.step < 1 ? 1 : 0);
+
+      const sl = document.createElement("input");
+      sl.type = "range"; sl.min = p.min; sl.max = p.max; sl.step = p.step; sl.value = curVal;
+      sl.style.cssText = "flex:1;height:14px;accent-color:#4a90d9;cursor:pointer;min-width:60px;";
+      sl.addEventListener("wheel", e => e.stopPropagation(), { passive: true });
+
+      const numInp = document.createElement("input");
+      numInp.type = "number"; numInp.min = p.min; numInp.max = p.max; numInp.step = p.step;
+      numInp.value = parseFloat(curVal).toFixed(dec);
+      numInp.style.cssText =
+        "width:56px;background:#111;border:1px solid #444;color:#ddd;" +
+        "padding:2px 5px;border-radius:4px;font-size:11px;text-align:right;" +
+        "appearance:textfield;-moz-appearance:textfield;";
+      numInp.addEventListener("wheel",   e => e.stopPropagation(), { passive: true });
+      numInp.addEventListener("keydown", e => e.stopPropagation());
+
+      sl.addEventListener("input", () => {
+        const v = parseFloat(sl.value);
+        numInp.value = v.toFixed(dec);
+        tempParticle.motionParams[p.key] = v;
+        notifyParticle();
+      });
+      numInp.addEventListener("change", () => {
+        let v = parseFloat(numInp.value);
+        if (isNaN(v)) { numInp.value = parseFloat(sl.value).toFixed(dec); return; }
+        v = Math.max(p.min, Math.min(p.max, v));
+        numInp.value = v.toFixed(dec); sl.value = v;
+        tempParticle.motionParams[p.key] = v;
+        notifyParticle();
+      });
+
+      slRow.append(sl, numInp);
+      rowWrap.appendChild(slRow);
+      rightPanel.appendChild(rowWrap);
+    }
+  }
+
+  // ---- パーティクルパラメーターパネル（回転・ランダム回転・ランダムスケール） ----
+  function buildParticleParamsPanel() {
+    rightPanel.replaceChildren();
+
+    rightPanel.appendChild(el("div", {
+      style: "font-size:14px;font-weight:bold;color:#ffccaa;padding-bottom:5px;" +
+             "border-bottom:1px solid #333;margin-bottom:4px;",
+    }, t("particleParams")));
+    rightPanel.appendChild(el("div", {
+      style: "font-size:11px;color:#778;margin-bottom:14px;",
+    }, t("particleParamsDesc")));
+
+    // ---- サイズ・広がり（共通ヘルパー） ----
+    function mkSlider(labelKey, min, max, step, getter, setter) {
+      const dec = step < 0.1 ? 2 : (step < 1 ? 1 : 0);
+      const wrap = el("div", { style: "margin-bottom:14px;" });
+      wrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:3px;" }, t(labelKey)));
+      const slRow = el("div", { style: "display:flex;align-items:center;gap:6px;" });
+      const sl = document.createElement("input");
+      sl.type = "range"; sl.min = min; sl.max = max; sl.step = step; sl.value = getter();
+      sl.style.cssText = "flex:1;height:14px;accent-color:#4a90d9;cursor:pointer;min-width:60px;";
+      sl.addEventListener("wheel", e => e.stopPropagation(), { passive: true });
+      const numInp = document.createElement("input");
+      numInp.type = "number"; numInp.min = min; numInp.max = max; numInp.step = step;
+      numInp.value = parseFloat(getter()).toFixed(dec);
+      numInp.style.cssText =
+        "width:56px;background:#111;border:1px solid #444;color:#ddd;" +
+        "padding:2px 5px;border-radius:4px;font-size:11px;text-align:right;" +
+        "appearance:textfield;-moz-appearance:textfield;";
+      numInp.addEventListener("wheel",   e => e.stopPropagation(), { passive: true });
+      numInp.addEventListener("keydown", e => e.stopPropagation());
+      sl.addEventListener("input", () => {
+        const v = parseFloat(sl.value); numInp.value = v.toFixed(dec); setter(v);
+      });
+      numInp.addEventListener("change", () => {
+        let v = parseFloat(numInp.value);
+        if (isNaN(v)) { numInp.value = parseFloat(sl.value).toFixed(dec); return; }
+        v = Math.max(min, Math.min(max, v));
+        numInp.value = v.toFixed(dec); sl.value = v; setter(v);
+      });
+      slRow.append(sl, numInp);
+      wrap.appendChild(slRow);
+      rightPanel.appendChild(wrap);
+    }
+
+    mkSlider("particleSize", 1, 20, 0.5,
+      () => tempParticle.size,
+      v  => { tempParticle.size = v; notifyParticle(); });
+    mkSlider("particleSpread", 0, 5, 0.1,
+      () => tempParticle.spread,
+      v  => { tempParticle.spread = v; notifyParticle(); });
+
+    // ---- 全体の強さ ----
+    {
+      const wrap = el("div", { style: "margin-bottom:14px;" });
+      wrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:3px;" }, t("globalStrength")));
+      const slRow = el("div", { style: "display:flex;align-items:center;gap:6px;" });
+
+      const sl = document.createElement("input");
+      sl.type = "range"; sl.min = 0.1; sl.max = 3.0; sl.step = 0.05; sl.value = tempParticle.globalStrength;
+      sl.style.cssText = "flex:1;height:14px;accent-color:#4a90d9;cursor:pointer;min-width:60px;";
+      sl.addEventListener("wheel", e => e.stopPropagation(), { passive: true });
+
+      const numInp = document.createElement("input");
+      numInp.type = "number"; numInp.min = 0.1; numInp.max = 3.0; numInp.step = 0.05;
+      numInp.value = parseFloat(tempParticle.globalStrength).toFixed(2);
+      numInp.style.cssText =
+        "width:56px;background:#111;border:1px solid #444;color:#ddd;" +
+        "padding:2px 5px;border-radius:4px;font-size:11px;text-align:right;" +
+        "appearance:textfield;-moz-appearance:textfield;";
+      numInp.addEventListener("wheel",   e => e.stopPropagation(), { passive: true });
+      numInp.addEventListener("keydown", e => e.stopPropagation());
+
+      sl.addEventListener("input", () => {
+        const v = parseFloat(sl.value); numInp.value = v.toFixed(2); tempParticle.globalStrength = v; notifyParticle();
+      });
+      numInp.addEventListener("change", () => {
+        let v = parseFloat(numInp.value);
+        if (isNaN(v)) { numInp.value = parseFloat(sl.value).toFixed(2); return; }
+        v = Math.max(0.1, Math.min(3.0, v));
+        numInp.value = v.toFixed(2); sl.value = v; tempParticle.globalStrength = v; notifyParticle();
+      });
+
+      slRow.append(sl, numInp);
+      wrap.appendChild(slRow);
+      rightPanel.appendChild(wrap);
+    }
+
+    // ---- 固定回転角度 ----
     const rotWrap = el("div", { style: "margin-bottom:12px;" });
     rotWrap.appendChild(
       el("div", { style: "font-size:11px;color:#99a;margin-bottom:4px;" }, t("rotationAngle"))
@@ -410,36 +705,47 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     rotNum.addEventListener("keydown", e => e.stopPropagation());
 
     rotSl.addEventListener("input", () => {
-      const v = parseInt(rotSl.value); rotNum.value = v; tempParticle.rotation = v;
+      const v = parseInt(rotSl.value); rotNum.value = v; tempParticle.rotation = v; notifyParticle();
     });
     rotNum.addEventListener("change", () => {
       let v = parseInt(rotNum.value);
       if (isNaN(v)) { rotNum.value = rotSl.value; return; }
       v = Math.max(0, Math.min(360, v));
-      rotNum.value = v; rotSl.value = v; tempParticle.rotation = v;
+      rotNum.value = v; rotSl.value = v; tempParticle.rotation = v; notifyParticle();
     });
 
     rotRow.append(rotSl, rotNum);
     rotWrap.appendChild(rotRow);
     rightPanel.appendChild(rotWrap);
 
-    // ---- ランダム回転 ----
-    const randWrap = el("div", { style: "margin-bottom:12px;" });
-    randWrap.appendChild(
-      el("div", { style: "font-size:11px;color:#99a;margin-bottom:6px;" }, t("randomRotation"))
-    );
-    const randRow = el("div", { style: "display:flex;align-items:center;gap:8px;" });
-    const randChk = document.createElement("input");
-    randChk.type    = "checkbox";
-    randChk.checked = tempParticle.randomRotation;
-    randChk.style.cssText = "width:16px;height:16px;cursor:pointer;accent-color:#4a90d9;flex-shrink:0;";
-    randChk.addEventListener("change", () => { tempParticle.randomRotation = randChk.checked; });
-    randRow.append(
-      randChk,
-      el("span", { style: "font-size:12px;color:#ccc;line-height:1.4;" }, t("randomRotationDesc"))
-    );
-    randWrap.appendChild(randRow);
-    rightPanel.appendChild(randWrap);
+    // ---- ランダム系チェックボックス ----
+    function mkCheckRow(labelKey, descKey, getter, setter) {
+      const wrap = el("div", { style: "margin-bottom:14px;" });
+      wrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:6px;" }, t(labelKey)));
+      const row = el("div", { style: "display:flex;align-items:center;gap:8px;" });
+      const chk = document.createElement("input");
+      chk.type    = "checkbox";
+      chk.checked = getter();
+      chk.style.cssText = "width:16px;height:16px;cursor:pointer;accent-color:#4a90d9;flex-shrink:0;";
+      chk.addEventListener("change", () => setter(chk.checked));
+      row.append(
+        chk,
+        el("span", { style: "font-size:12px;color:#ccc;line-height:1.4;" }, t(descKey))
+      );
+      wrap.appendChild(row);
+      return wrap;
+    }
+
+    rightPanel.appendChild(mkCheckRow(
+      "randomRotation", "randomRotationDesc",
+      () => tempParticle.randomRotation,
+      v => { tempParticle.randomRotation = v; notifyParticle(); }
+    ));
+    rightPanel.appendChild(mkCheckRow(
+      "randomScale", "randomScaleDesc",
+      () => tempParticle.randomScale,
+      v => { tempParticle.randomScale = v; notifyParticle(); }
+    ));
 
     rightPanel.appendChild(el("div", {
       style: "font-size:10px;color:#556;margin-top:6px;line-height:1.6;border-top:1px solid #222;padding-top:8px;",
@@ -490,10 +796,19 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     buildParticleParamPanel();
   }
 
+  function selectParticleParams() {
+    currentKey = "particle_params";
+    highlightList("particle_params");
+    buildParticleParamsPanel();
+  }
+
   // ---- クリーンアップ ----
   function cleanup(saved) {
     cancelAnimationFrame(rafId);
-    if (!saved) onPreview(origSettings);
+    if (!saved) {
+      onPreview(origSettings);
+      onParticlePreview?.(null);
+    }
     overlay.remove();
   }
 

@@ -96,11 +96,90 @@ function getParticleTexture(PIXI, renderer) {
   return baseParticleTexture;
 }
 
+// ---- プリセットシェイプテクスチャ ----
+const PARTICLE_SHAPE_PRESETS = [
+  "circle_outline", "circle_fill",
+  "square_outline",  "square_fill",
+  "triangle_outline","triangle_fill",
+  "star_outline",    "star_fill",
+];
+
+const _shapeTexCache = {};
+
+function _drawShape(ctx, shapeType) {
+  const cx = 32, cy = 32, r = 26;
+  ctx.clearRect(0, 0, 64, 64);
+  ctx.fillStyle = "white";
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  switch (shapeType) {
+    case "circle_outline":
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      break;
+    case "circle_fill":
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      break;
+    case "square_outline":
+      ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+      break;
+    case "square_fill":
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      break;
+    case "triangle_outline": {
+      const oy = r * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(cx,      cy - r);
+      ctx.lineTo(cx + r,  cy + oy);
+      ctx.lineTo(cx - r,  cy + oy);
+      ctx.closePath(); ctx.stroke();
+      break;
+    }
+    case "triangle_fill": {
+      const oy = r * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(cx,      cy - r);
+      ctx.lineTo(cx + r,  cy + oy);
+      ctx.lineTo(cx - r,  cy + oy);
+      ctx.closePath(); ctx.fill();
+      break;
+    }
+    case "star_outline":
+    case "star_fill": {
+      const pts = 5, outer = r, inner = r * 0.42;
+      ctx.beginPath();
+      for (let i = 0; i < pts * 2; i++) {
+        const a = (i * Math.PI / pts) - Math.PI / 2;
+        const d = i % 2 === 0 ? outer : inner;
+        i === 0 ? ctx.moveTo(cx + Math.cos(a)*d, cy + Math.sin(a)*d)
+                : ctx.lineTo(cx + Math.cos(a)*d, cy + Math.sin(a)*d);
+      }
+      ctx.closePath();
+      shapeType === "star_fill" ? ctx.fill() : ctx.stroke();
+      break;
+    }
+  }
+}
+
+function getShapeTexture(PIXI, shapeType) {
+  if (!shapeType || shapeType === "default") return getParticleTexture(PIXI);
+  if (_shapeTexCache[shapeType] && !_shapeTexCache[shapeType].destroyed) {
+    return _shapeTexCache[shapeType];
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = 64; canvas.height = 64;
+  _drawShape(canvas.getContext("2d"), shapeType);
+  _shapeTexCache[shapeType] = PIXI.Texture.from(canvas);
+  return _shapeTexCache[shapeType];
+}
+
 // ================================================================
 // パーティクルシステム基底 (PIXIJS)
 // ================================================================
 class ParticleSystem {
-  constructor(scene, PIXI, renderer, count, gradientFn, origin, direction, particleSize, strength, customTexture = null, particleRotation = 0, randomParticleRotation = false) {
+  constructor(scene, PIXI, renderer, count, gradientFn, origin, direction, particleSize, strength, customTextures = null, particleRotation = 0, randomParticleRotation = false, randomScale = false, shapePreset = "default", randomShape = false, motionParams = null, spread = 1.0) {
     this.PIXI = PIXI; this.scene = scene; this.renderer = renderer; this.count = count;
     this.gradientFn = gradientFn; this.origin = origin; this.direction = direction;
     this.particleSize = particleSize; this.strength = strength;
@@ -108,10 +187,15 @@ class ParticleSystem {
     this.container = new PIXI.Container();
     this.scene.addChild(this.container);
 
-    this.velocities = []; this.lifetimes = []; this.ages = [];
-    this.customTexture         = customTexture;
-    this.particleRotation      = particleRotation;
+    this.velocities = []; this.lifetimes = []; this.ages = []; this.scales = [];
+    this.customTextures         = (customTextures && customTextures.length > 0) ? customTextures : null;
+    this.particleRotation       = particleRotation;
     this.randomParticleRotation = randomParticleRotation;
+    this.randomScale            = randomScale;
+    this.shapePreset            = shapePreset;
+    this.randomShape            = randomShape;
+    this.motionParams           = motionParams || {};
+    this.spread                 = spread;
     this.init();
   }
   init(){} update(delta){}
@@ -129,20 +213,52 @@ class ParticleSystem {
     sprite.tint = (Math.round(c.r*255)<<16) | (Math.round(c.g*255)<<8) | Math.round(c.b*255);
     sprite.alpha = alphaValue;
   }
+  _pickTex(i) {
+    if (this.customTextures) {
+      return this.customTextures[Math.floor(Math.random() * this.customTextures.length)];
+    }
+    if (this.randomShape) {
+      return getShapeTexture(this.PIXI,
+        PARTICLE_SHAPE_PRESETS[Math.floor(Math.random() * PARTICLE_SHAPE_PRESETS.length)]);
+    }
+    return getShapeTexture(this.PIXI, this.shapePreset);
+  }
+
   _spawnAll(blendMode) {
-    const tex     = this.customTexture || getParticleTexture(this.PIXI, this.renderer);
     const baseRot = (this.particleRotation ?? 0) * Math.PI / 180;
     if (blendMode === undefined) blendMode = this.PIXI.BLEND_MODES.NORMAL;
     for (let i = 0; i < this.count; i++) {
-      const sprite = new this.PIXI.Sprite(tex);
+      const sprite = new this.PIXI.Sprite(this._pickTex(i));
       sprite.anchor.set(0.5);
       sprite.blendMode = blendMode;
       sprite.rotation  = baseRot + ((this.randomParticleRotation ?? false) ? Math.random() * Math.PI * 2 : 0);
+      this.scales[i]   = this.randomScale ? 0.5 + Math.random() * 1.0 : 1.0;
       this.container.addChild(sprite);
       this.particles.push(sprite);
       this._resetParticle(i);
       this.ages[i] = Math.random() * (this.lifetimes[i] || 1);
       this._setColorAndAlpha(i, this.ages[i] / (this.lifetimes[i] || 1));
+    }
+  }
+  _applyMotion(sprite, i, delta) {
+    const { turbulence = 0, turbFreq = 1, windX = 0, windY = 0, swirl = 0 } = this.motionParams;
+    const age = this.ages[i] || 0;
+
+    if (turbulence !== 0) {
+      // 各パーティクルが異なる位相を持つよう黄金比・自然定数でオフセット
+      sprite.position.x += Math.sin(age * turbFreq + i * 1.6180) * turbulence * delta * 60;
+      sprite.position.y += Math.cos(age * turbFreq + i * 2.7183) * turbulence * delta * 60;
+    }
+    if (windX !== 0) sprite.position.x += windX * delta;
+    if (windY !== 0) sprite.position.y += windY * delta;
+    if (swirl !== 0) {
+      const dx = sprite.position.x - this.origin.x;
+      const dy = sprite.position.y - this.origin.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 1) {
+        sprite.position.x += (-dy / dist) * swirl * delta * 60;
+        sprite.position.y += ( dx / dist) * swirl * delta * 60;
+      }
     }
   }
 }
@@ -158,7 +274,7 @@ class SmokeSystem extends ParticleSystem {
     const ox=this.origin.x, oy=this.origin.y, dir=this.direction;
     sprite.position.set(ox+(Math.random()-.5)*40, oy+(Math.random()-.5)*12);
     
-    const spd=(30+Math.random()*20)*this.strength, a=dir+(Math.random()-.5)*.5;
+    const spd=(30+Math.random()*20)*this.strength, a=dir+(Math.random()-.5)*.5*(this.spread??1);
     this.velocities[i]={x:Math.cos(a)*spd*.3+(Math.random()-.5)*8, y:Math.sin(a)*spd};
     this.lifetimes[i]=3.0+Math.random()*2.0; this.ages[i]=0;
   }
@@ -171,7 +287,8 @@ class SmokeSystem extends ParticleSystem {
       sprite.position.x += this.velocities[i].x*delta;
       sprite.position.y += this.velocities[i].y*delta;
       sprite.position.x += Math.sin(this.ages[i]*2.5+i)*2*delta;
-      sprite.scale.set(this._getScale(this.particleSize*(18+t*12)));
+      this._applyMotion(sprite, i, delta);
+      sprite.scale.set(this._getScale(this.particleSize*(18+t*12)) * (this.scales[i] ?? 1));
       this._setColorAndAlpha(i, t, 0.35);
     }
   }
@@ -186,12 +303,13 @@ class SparkSystem extends ParticleSystem {
   _resetParticle(i) {
     const sprite = this.particles[i];
     const ox=this.origin.x, oy=this.origin.y;
-    const angle=this.direction+(Math.random()-.5)*1.2;
-    const speed=(40+Math.random()*120)*this.particleSize*this.strength;
+    const angle=this.direction+(Math.random()-.5)*1.2*(this.spread??1);
+    const speed=(40+Math.random()*120)*this.strength;
     sprite.position.set(ox+(Math.random()-.5)*10, oy+(Math.random()-.5)*10);
     this.velocities[i]={x:Math.cos(angle)*speed, y:Math.sin(angle)*speed};
     this.lifetimes[i]=.5+Math.random()*1.0; this.ages[i]=0;
-    sprite.scale.set(this._getScale(this.particleSize*4));
+    this.scales[i] = this.randomScale ? 0.5 + Math.random() * 1.0 : 1.0;
+    sprite.scale.set(this._getScale(this.particleSize*4) * this.scales[i]);
   }
   update(delta) {
     const g=-180;
@@ -202,6 +320,7 @@ class SparkSystem extends ParticleSystem {
       sprite.position.x += this.velocities[i].x*delta;
       sprite.position.y += this.velocities[i].y*delta;
       this.velocities[i].y += g*delta;
+      this._applyMotion(sprite, i, delta);
       this._setColorAndAlpha(i, this.ages[i]/this.lifetimes[i], 0.9);
     }
   }
@@ -216,12 +335,13 @@ class RaySystem extends ParticleSystem {
   _resetParticle(i) {
     const sprite = this.particles[i];
     const ox=this.origin.x, oy=this.origin.y;
-    const angle=this.direction+(Math.random()-.5)*.6;
-    const speed=(60+Math.random()*140)*this.particleSize*this.strength;
+    const angle=this.direction+(Math.random()-.5)*.6*(this.spread??1);
+    const speed=(60+Math.random()*140)*this.strength;
     sprite.position.set(ox, oy);
     this.velocities[i]={x:Math.cos(angle)*speed, y:Math.sin(angle)*speed};
     this.lifetimes[i]=.8+Math.random()*.8; this.ages[i]=0;
-    sprite.scale.set(this._getScale(this.particleSize*3));
+    this.scales[i] = this.randomScale ? 0.5 + Math.random() * 1.0 : 1.0;
+    sprite.scale.set(this._getScale(this.particleSize*3) * this.scales[i]);
   }
   update(delta) {
     for (let i=0;i<this.count;i++) {
@@ -231,6 +351,7 @@ class RaySystem extends ParticleSystem {
       const sprite = this.particles[i];
       sprite.position.x += this.velocities[i].x*delta*fade;
       sprite.position.y += this.velocities[i].y*delta*fade;
+      this._applyMotion(sprite, i, delta);
       this._setColorAndAlpha(i, t, 0.8 * fade);
     }
   }
@@ -260,13 +381,12 @@ class StarWarpSystem extends ParticleSystem {
     this.fov          = 20;
     this.baseSpeed    = 0.025;
     // 512px キャンバス基準: 1920px 相当の元サンプルに合わせてストレッチを補正
-    this.starStretch  = Math.max(1, this.particleSize * 0.4);
+    this.starStretch  = 2.0;
     this.starBaseSize = Math.max(0.02, this.particleSize * 0.005);
     this.stars        = [];
 
-    const tex = this.customTexture || getParticleTexture(this.PIXI, this.renderer);
     for (let i = 0; i < this.count; i++) {
-      const sprite = new this.PIXI.Sprite(tex);
+      const sprite = new this.PIXI.Sprite(this._pickTex(i));
       sprite.anchor.set(0.5, 0.7);
       sprite.blendMode = this.PIXI.BLEND_MODES.ADD;
       this.container.addChild(sprite);
@@ -274,6 +394,7 @@ class StarWarpSystem extends ParticleSystem {
       const s = { z: 0, x: 0, y: 0 };
       this._randomizeStar(s, true);
       this.stars.push(s);
+      this.scales[i] = this.randomScale ? 0.5 + Math.random() * 1.0 : 1.0;
     }
   }
 
@@ -317,9 +438,10 @@ class StarWarpSystem extends ParticleSystem {
       const dy   = py - this.origin.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      sprite.scale.x = distanceScale * this.starBaseSize;
-      sprite.scale.y = distanceScale * this.starBaseSize
-        + distanceScale * this.speed * this.starStretch * (dist / W);
+      const sf = this.scales[i] ?? 1;
+      sprite.scale.x = distanceScale * this.starBaseSize * sf;
+      sprite.scale.y = (distanceScale * this.starBaseSize
+        + distanceScale * this.speed * this.starStretch * (dist / W)) * sf;
 
       // scene.scale.y=-1 を考慮した回転
       // 原作: atan2(dyCenter_canvas, dxCenter_canvas) + π/2
@@ -329,6 +451,8 @@ class StarWarpSystem extends ParticleSystem {
       // 直接導出: local -Y のキャンバス方向 = (sinθ, cosθ) を VP 外向き (dx,-dy) に合わせると
       //   sprite.rotation = Math.atan2(dx, -dy)
       sprite.rotation = Math.atan2(dx, -dy);
+
+      this._applyMotion(sprite, i, delta);
 
       // カメラに近いほど明るく・グラデーション終端色
       this._setColorAndAlpha(i, distanceScale, distanceScale);
@@ -341,8 +465,8 @@ class NoneSystem extends ParticleSystem {
   update(_dt)  {}
 }
 
-function createParticleSystem(type,scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,customTexture=null,particleRotation=0,randomParticleRotation=false) {
-  const ex = [customTexture, particleRotation, randomParticleRotation];
+function createParticleSystem(type,scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,customTextures=null,particleRotation=0,randomParticleRotation=false,randomScale=false,shapePreset="default",randomShape=false,motionParams=null,spread=1.0) {
+  const ex = [customTextures, particleRotation, randomParticleRotation, randomScale, shapePreset, randomShape, motionParams, spread];
   switch(type) {
     case "none":      return new NoneSystem     (scene,PIXI,renderer,0,    gradientFn,origin,direction,size,strength,...ex);
     case "smoke":     return new SmokeSystem    (scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,...ex);
@@ -566,34 +690,55 @@ app.registerExtension({
         node.properties.filterOnBg = filterOnBg;
       }
 
-      // ---- カスタムパーティクルテクスチャ ----
-      let customParticleTextureUrl = node.properties?.particleTextureUrl ?? null;
-      let customParticleTexture = null;
+      // ---- カスタムパーティクルテクスチャ（複数） ----
+      // 旧形式（particleTextureUrl）からの移行も onConfigure で処理
+      let customParticleTextures = []; // [{url: string, name: string, tex: PIXI.Texture|null}]
 
-      async function loadCustomTexture(url) {
-        if (!url) { customParticleTexture = null; return; }
-        // FileReader 経由の data:image/ のみ許可（file:// や外部 URL を拒否）
-        if (!url.startsWith("data:image/") && !url.startsWith("/")) {
-          console.warn("[ParticleRenderer] unsafe texture URL rejected:", url.slice(0, 40));
-          customParticleTexture = null;
-          return;
-        }
-        try {
-          customParticleTexture = await PIXI.Texture.fromURL(url);
-        } catch(e) {
-          console.warn("[ParticleRenderer] custom texture load failed:", e);
-          customParticleTexture = null;
+      async function loadCustomTextures() {
+        for (const item of customParticleTextures) {
+          if (item.tex && !item.tex.destroyed) continue;
+          if (!item.url || (!item.url.startsWith("data:image/") && !item.url.startsWith("/"))) {
+            item.tex = null;
+            continue;
+          }
+          try {
+            item.tex = await PIXI.Texture.fromURL(item.url);
+          } catch(e) {
+            console.warn("[ParticleRenderer] custom texture load failed:", e);
+            item.tex = null;
+          }
         }
       }
 
-      // ---- パーティクル回転 ----
+      function getLoadedTextures() {
+        return customParticleTextures.map(t => t.tex).filter(t => t && !t.destroyed);
+      }
+
+      // ---- パーティクル回転・スケール・シェイプ ----
+      let currentSize            = node.properties?.particleSize           ?? 5.0;
+      let particleSpread         = node.properties?.particleSpread         ?? 1.0;
       let particleRotation       = node.properties?.particleRotation       ?? 0;
       let randomParticleRotation = node.properties?.randomParticleRotation ?? false;
+      let randomParticleScale    = node.properties?.randomParticleScale    ?? false;
+      let particleShapePreset    = node.properties?.particleShapePreset    ?? "default";
+      let randomParticleShape    = node.properties?.randomParticleShape    ?? false;
+      const _defMotionParams     = { turbulence: 0, turbFreq: 1, windX: 0, windY: 0, swirl: 0 };
+      let particleMotionParams   = node.properties?.particleMotionParams
+        ? { ..._defMotionParams, ...node.properties.particleMotionParams }
+        : { ..._defMotionParams };
+      let globalStrength         = node.properties?.globalStrength ?? 1.0;
 
       function saveParticleSettings() {
         node.properties = node.properties || {};
+        node.properties.particleSize           = currentSize;
+        node.properties.particleSpread         = particleSpread;
         node.properties.particleRotation       = particleRotation;
         node.properties.randomParticleRotation = randomParticleRotation;
+        node.properties.randomParticleScale    = randomParticleScale;
+        node.properties.particleShapePreset    = particleShapePreset;
+        node.properties.randomParticleShape    = randomParticleShape;
+        node.properties.particleMotionParams   = { ...particleMotionParams };
+        node.properties.globalStrength         = globalStrength;
       }
 
       async function loadBackgroundSprite() {
@@ -612,7 +757,10 @@ app.registerExtension({
           data = await res.json();
         } catch (_) { return; }
         if (!data.image) return;
-        const tex = await PIXI.Texture.fromURL(data.image);
+        if (!filterWrapper) return;
+        let tex;
+        try { tex = await PIXI.Texture.fromURL(data.image); } catch(_) { return; }
+        if (!filterWrapper) return; // 非同期待機中に破棄された場合
         bgSprite = new PIXI.Sprite(tex);
         bgSprite.width  = currentW;
         bgSprite.height = currentH;
@@ -636,9 +784,6 @@ app.registerExtension({
 
       const ARROW_MIN=20, ARROW_MAX=200;
       const getStrength = em => 0.2+(em.arrowLenPx-ARROW_MIN)/(ARROW_MAX-ARROW_MIN)*2.8;
-
-      // ---- サイズ ----
-      let currentSize = 5.0;
 
       // ---- カラーグラデーション ----
       let colorStops = (node.properties?.colorStops)
@@ -727,18 +872,43 @@ app.registerExtension({
       }
 
       // ---- パーティクル再構築 ----
-      function rebuildParticles() {
+      function rebuildParticles(overrides = null) {
         for (const ps of particleSystems) ps.dispose();
-        particleSystems=[];
+        particleSystems = [];
         if (!scene || !pixiApp) return;
         const type  = node.widgets?.find(w=>w.name==="particle_type")?.value??"smoke";
         const total = parseInt(node.widgets?.find(w=>w.name==="particle_count")?.value??200);
         const countPerEm = type === "none" ? 0 : Math.max(10, Math.floor(total/emitters.length));
+
+        // プレビューオーバーライド: nullなら通常設定を使用
+        let _texsArr;
+        if (overrides && overrides.textures !== undefined) {
+          // item.tex があればそれを優先、なければ customParticleTextures から URL で照合
+          const matched = (overrides.textures ?? [])
+            .map(ot => ot.tex ?? customParticleTextures.find(ct => ct.url === ot.url)?.tex)
+            .filter(t => t && !t.destroyed);
+          _texsArr = matched.length > 0 ? matched : null;
+        } else {
+          const loaded = getLoadedTextures();
+          _texsArr = loaded.length > 0 ? loaded : null;
+        }
+        const _size    = overrides?.size           ?? currentSize;
+        const _rot     = overrides?.rotation       ?? particleRotation;
+        const _randRot = overrides?.randomRotation ?? randomParticleRotation;
+        const _randSc  = overrides?.randomScale    ?? randomParticleScale;
+        const _shape   = overrides?.shapePreset    ?? particleShapePreset;
+        const _randSh  = overrides?.randomShape    ?? randomParticleShape;
+        const _motion  = overrides?.motionParams
+          ? { ..._defMotionParams, ...overrides.motionParams }
+          : particleMotionParams;
+        const _spread  = overrides?.spread         ?? particleSpread;
+        const _gs      = overrides?.globalStrength ?? globalStrength;
+
         for (const em of emitters) {
           particleSystems.push(createParticleSystem(
             type, particleLayer, PIXI, pixiApp.renderer, countPerEm, gradientFn,
-            em.origin, em.direction, currentSize, getStrength(em),
-            customParticleTexture, particleRotation, randomParticleRotation
+            em.origin, em.direction, _size, getStrength(em) * _gs,
+            _texsArr, _rot, _randRot, _randSc, _shape, _randSh, _motion, _spread
           ));
         }
         applyFilter();
@@ -1108,8 +1278,8 @@ app.registerExtension({
         initPixiApp(wv, hv);
         resizeRenderer(wv, hv);
         applyBgColor();
-        if (customParticleTextureUrl && !customParticleTexture) {
-          await loadCustomTexture(customParticleTextureUrl);
+        if (customParticleTextures.some(t => !t.tex || t.tex.destroyed)) {
+          await loadCustomTextures();
         }
         rebuildParticles();
         await loadBackgroundSprite();
@@ -1166,9 +1336,16 @@ app.registerExtension({
           mainCanvas: canvas,
           filterSettings,
           particleSettings: {
-            textureUrl:     customParticleTextureUrl,
+            textures:       customParticleTextures.map(t => ({ url: t.url, name: t.name })),
+            size:           currentSize,
+            spread:         particleSpread,
             rotation:       particleRotation,
             randomRotation: randomParticleRotation,
+            randomScale:    randomParticleScale,
+            shapePreset:    particleShapePreset,
+            randomShape:    randomParticleShape,
+            motionParams:   { ...particleMotionParams },
+            globalStrength: globalStrength,
           },
           onPreview: settings => {
             filterSettings.type   = settings.type;
@@ -1185,16 +1362,24 @@ app.registerExtension({
             applyFilter();
 
             // パーティクル設定
-            const prevUrl          = customParticleTextureUrl;
-            customParticleTextureUrl  = particleSets.textureUrl  || null;
-            particleRotation          = particleSets.rotation    ?? 0;
+            const prevUrls = customParticleTextures.map(t => t.url).join(",");
+            // URLが同じエントリは既存のロード済み tex を引き継ぐ（再ロード不要）
+            customParticleTextures = (particleSets.textures ?? []).map(t => {
+              const existing = customParticleTextures.find(ct => ct.url === t.url);
+              return { url: t.url, name: t.name, tex: existing?.tex ?? null };
+            });
+            currentSize               = particleSets.size           ?? currentSize;
+            particleSpread            = particleSets.spread         ?? 1.0;
+            particleRotation          = particleSets.rotation       ?? 0;
             randomParticleRotation    = particleSets.randomRotation ?? false;
+            randomParticleScale       = particleSets.randomScale    ?? false;
+            particleShapePreset       = particleSets.shapePreset   ?? "default";
+            randomParticleShape       = particleSets.randomShape   ?? false;
+            particleMotionParams      = { ..._defMotionParams, ...(particleSets.motionParams ?? {}) };
+            globalStrength            = particleSets.globalStrength ?? 1.0;
             node.properties = node.properties || {};
-            if (customParticleTextureUrl) {
-              node.properties.particleTextureUrl = customParticleTextureUrl;
-            } else {
-              delete node.properties.particleTextureUrl;
-            }
+            node.properties.particleTextures = customParticleTextures.map(t => ({ url: t.url, name: t.name }));
+            delete node.properties.particleTextureUrl; // 旧形式を削除
             saveParticleSettings();
 
             const doRebuild = () => {
@@ -1202,16 +1387,28 @@ app.registerExtension({
               if (!animating && pixiApp) pixiApp.render();
               node.setDirtyCanvas(true, false);
             };
-            if (customParticleTextureUrl !== prevUrl) {
-              customParticleTexture = null;
-              if (customParticleTextureUrl && pixiApp) {
-                loadCustomTexture(customParticleTextureUrl).then(doRebuild);
-              } else {
-                doRebuild();
-              }
+            const newUrls = customParticleTextures.map(t => t.url).join(",");
+            if (newUrls !== prevUrls && pixiApp) {
+              loadCustomTextures().then(doRebuild);
             } else {
               doRebuild();
             }
+          },
+          onParticlePreview: async (snap) => {
+            if (!pixiApp) return;
+            if (snap?.textures?.length) {
+              // snap.textures の各アイテムに PIXI.Texture を付与（未ロード分は即時ロード）
+              await Promise.all(snap.textures.map(async item => {
+                const found = customParticleTextures.find(ct => ct.url === item.url);
+                if (found?.tex && !found.tex.destroyed) { item.tex = found.tex; return; }
+                if (item.url?.startsWith("data:image/") || item.url?.startsWith("/")) {
+                  try { item.tex = await PIXI.Texture.fromURL(item.url); } catch(_) {}
+                }
+              }));
+            }
+            rebuildParticles(snap);
+            if (!animating) pixiApp.render();
+            node.setDirtyCanvas(true, false);
           },
         });
       };
@@ -1223,12 +1420,15 @@ app.registerExtension({
         filterOnBg ? "#4a4a8a" : "#333344",
         t("bgFilterTitle")
       );
-      filterOnBgBtn.onclick = () => {
+      filterOnBgBtn.onclick = async () => {
         filterOnBg = !filterOnBg;
         filterOnBgBtn.textContent = filterOnBg ? t("bgFilterOn") : t("bgFilterOff");
         filterOnBgBtn.style.background = filterOnBg ? "#4a4a8a" : "#333344";
         saveFilterOnBg();
-        applyFilter(); // フィルター対象（scene/particleLayer）を即時切り替え
+        if (pixiApp) await loadBackgroundSprite();
+        applyFilter();
+        if (!animating && pixiApp) pixiApp.render();
+        node.setDirtyCanvas(true, false);
       };
       btnRow2.appendChild(filterOnBgBtn);
 
@@ -1303,15 +1503,38 @@ app.registerExtension({
           filterOnBgBtn.textContent = filterOnBg ? t("bgFilterOn") : t("bgFilterOff");
           filterOnBgBtn.style.background = filterOnBg ? "#4a4a8a" : "#333344";
         }
-        if (node.properties?.particleTextureUrl !== undefined) {
-          customParticleTextureUrl = node.properties.particleTextureUrl || null;
-          customParticleTexture    = null; // PIXI テクスチャは再生時に再生成
+        if (node.properties?.particleTextures !== undefined) {
+          customParticleTextures = (node.properties.particleTextures ?? []).map(t => ({ ...t, tex: null }));
+        } else if (node.properties?.particleTextureUrl) {
+          // 旧形式からの移行
+          customParticleTextures = [{ url: node.properties.particleTextureUrl, name: "texture", tex: null }];
+        }
+        if (node.properties?.particleSize !== undefined) {
+          currentSize = node.properties.particleSize;
+        }
+        if (node.properties?.particleSpread !== undefined) {
+          particleSpread = node.properties.particleSpread;
         }
         if (node.properties?.particleRotation !== undefined) {
           particleRotation = node.properties.particleRotation;
         }
         if (node.properties?.randomParticleRotation !== undefined) {
           randomParticleRotation = node.properties.randomParticleRotation;
+        }
+        if (node.properties?.randomParticleScale !== undefined) {
+          randomParticleScale = node.properties.randomParticleScale;
+        }
+        if (node.properties?.particleShapePreset !== undefined) {
+          particleShapePreset = node.properties.particleShapePreset;
+        }
+        if (node.properties?.randomParticleShape !== undefined) {
+          randomParticleShape = node.properties.randomParticleShape;
+        }
+        if (node.properties?.particleMotionParams !== undefined) {
+          particleMotionParams = { ..._defMotionParams, ...node.properties.particleMotionParams };
+        }
+        if (node.properties?.globalStrength !== undefined) {
+          globalStrength = node.properties.globalStrength;
         }
         // COLOR widget の null 値を確実に修正する（標準 + MTB 両方）
         const col = colorStops[selectedStopIdx]?.color;
@@ -1324,6 +1547,18 @@ app.registerExtension({
             }
           }
         });
+      };
+
+      // Python render() 完了後に background sprite をリロード
+      // （onExecuted 時点で input_images[nodeId] が確実に更新済み）
+      const origOnExecuted = node.onExecuted;
+      node.onExecuted = async function(data) {
+        origOnExecuted?.apply(this, arguments);
+        if (pixiApp && filterOnBg) {
+          await loadBackgroundSprite();
+          if (!animating) pixiApp.render();
+          node.setDirtyCanvas(true, false);
+        }
       };
 
       const origOnRemoved=node.onRemoved;
