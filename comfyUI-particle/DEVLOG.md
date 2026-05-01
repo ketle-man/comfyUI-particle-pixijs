@@ -635,3 +635,132 @@ if (!filterWrapper) return;
 3. ▶ Play でアニメーション開始
 4. Queue Prompt を実行（Python `render()` が走り `bgSprite` がロードされる）
 5. ■ Stop & Capture でキャプチャ → フィルターが背景＋パーティクル両方に適用された画像を出力
+
+---
+
+## セッション 8
+
+### パーティクルブレンドモードのドロップダウン追加
+
+**目的**: パーティクルスプライトのブレンドモードをUIから切り替えられるようにする。
+
+**実装**:
+- `currentBlendMode` 状態変数を追加（デフォルト: `"default"` = 各パーティクルタイプの標準値を使用）
+- ボタン行2（BG+Filter ボタンの右隣）に `<select>` ドロップダウンを追加
+- 選択肢: Default / Normal / Add / Multiply / Screen
+- `applyBlendMode()` 関数を追加 — 選択されたブレンドモードをすべての既存スプライトに後から上書き適用
+- `rebuildParticles()` の末尾で `applyBlendMode()` を呼び出し（`applyFilter()` の後）
+- 設定は `node.properties.blendMode` で永続化・`onConfigure` で復元
+- i18n: en / ja / zh に `blendMode` / `blendDefault` / `blendNormal` / `blendAdd` / `blendMultiply` / `blendScreen` キーを追加
+
+**動作詳細**:
+- `"default"` 選択時は何も上書きしない（SmokeSystem=NORMAL、Spark/Ray/StarWarp=ADD を維持）
+- それ以外を選択すると `PIXI.BLEND_MODES[currentBlendMode]` を全スプライトに適用
+- アニメーション再生中に変更した場合、`rebuildParticles()` が呼ばれるまで反映されないため、ドロップダウン変更時に `applyBlendMode()` と `pixiApp.render()` を直接呼び出して即時反映する
+
+```js
+function applyBlendMode() {
+  if (currentBlendMode === "default" || particleSystems.length === 0) return;
+  const bm = PIXI.BLEND_MODES[currentBlendMode] ?? PIXI.BLEND_MODES.NORMAL;
+  for (const ps of particleSystems) {
+    for (const sprite of ps.particles) sprite.blendMode = bm;
+  }
+}
+```
+
+---
+
+### BG+Filter: ON 時の DropShadow / Outline 不表示バグの修正
+
+**症状**: BG+Filter: ON の状態で DropShadow または Outline フィルターを選択しても、画面に変化が見られない。
+
+**調査過程**:
+
+1. 最初の仮説: `filterWrapper` に `filterArea` が設定されていないため、`scene.scale.y=-1` によるbounds計算の崩れでDropShadow/Outlineがクリップされている → `filterArea` と `padding` を設定したが改善なし
+
+2. 次の仮説: `filterWrapper` への適用自体が問題 → ターゲットを `pixiApp.stage` に変更し、`bgColorRect` を `filterWrapper` の子に移動したが改善なし
+
+3. **根本原因の特定**: DropShadow / Outline は「コンテンツのアルファエッジを検出して外側に描画する」タイプのフィルターである。BG+Filter: ON 時に `filterWrapper`（または `stage`）全体にこれらを適用すると、**検出されるエッジが「コンテンツ全体の外周 = キャンバスの端」** になる。背景画像がキャンバス全面を不透明に覆っている場合、外周はキャンバスの外側になり効果が完全に見えなくなる。
+
+   一方、Glow / Bloom / KawaseBlur などの輝度系フィルターは画面上の明るいピクセルを拡散させるだけなので、全体適用でも意図通りに機能する。
+
+**修正内容（最終）**:
+
+Outline / DropShadow だけでなく **Glow も同様に効かない**ことが確認された。Glow も「コンテンツのアルファ境界から外向きに光を放射する」フィルターであり、不透明な背景全体に適用するとエッジがキャンバス端にしか出ないため見えなくなる。
+
+また、「背景画像にもフィルターを効かせたい」という要件があるため、`particleLayer` と `bgSprite` に**それぞれ個別のフィルターインスタンスを適用する**方式に変更した。同一インスタンスを複数コンテナに割り当てると PixiJS の内部状態が競合するため、毎回新規インスタンスを生成する `makeFilter()` ファクトリ関数を導入した。
+
+```js
+function makeFilter() {
+  switch (f) {
+    case "glow": return new PF.GlowFilter({...});
+    case "outline": { const fil = new PF.OutlineFilter(...); fil.padding = ...; return fil; }
+    // ... 全フィルタータイプ
+    default: return null;
+  }
+}
+
+if (type === "none") {
+  // particleLayer が空のため stage に適用
+  const fil = makeFilter();
+  pixiApp.stage.filters = [fil];
+  pixiApp.stage.filterArea = new PIXI.Rectangle(-pad, -pad, currentW + pad*2, currentH + pad*2);
+} else {
+  // パーティクルレイヤーに適用（常に）
+  particleLayer.filters = [makeFilter()];
+  // BG+Filter: ON かつ bgSprite あり → 背景画像にも個別インスタンスで適用
+  if (filterOnBg && bgSprite) {
+    bgSprite.filters = [makeFilter()];
+  }
+}
+```
+
+**フィルター適用先まとめ（最終）**:
+
+| 条件 | particleLayer | bgSprite |
+|------|--------------|----------|
+| BG+Filter: OFF、particles あり | ✓ 適用 | — |
+| BG+Filter: ON、particles あり | ✓ 適用 | ✓ 適用（個別インスタンス） |
+| particle_type=none | — | — （stage に適用） |
+
+**副次的変更（stage への適用に伴うコンテナ構造変更）**:
+
+`bgColorRect` を `pixiApp.stage` の直接の子から `filterWrapper` の最初の子に移動。これにより `stage` の直接の子は `filterWrapper` のみとなり、`stage` の bounds 計算が `scene.scale.y=-1` の影響を受けにくくなる。
+
+```
+変更前:
+stage
+├── bgColorRect   ← stage の直接の子
+└── filterWrapper
+    └── scene (scale.y=-1)
+
+変更後:
+stage              ← 子は filterWrapper のみ
+└── filterWrapper
+    ├── bgColorRect  ← filterWrapper の最初の子に移動
+    ├── bgSprite
+    └── scene (scale.y=-1)
+```
+
+---
+
+### バグ修正: 再生ボタンを押すと bgSprite のフィルターが解除される問題
+
+**症状**: フィルターライブラリでフィルターを設定して背景画像にプレビューできていても、▶ Play を押すと背景画像のフィルターが解除される。
+
+**根本原因**: `playBtn.onclick` では `rebuildParticles()` → `applyFilter()` → `loadBackgroundSprite()` の順で処理されていた（`rebuildParticles()` 内部で `applyFilter()` が呼ばれるが、その時点では `bgSprite = null`）。`loadBackgroundSprite()` の完了後に `applyFilter()` が呼ばれないため、ロードされた `bgSprite` にフィルターが適用されないまま再生が開始されていた。`node.onExecuted` も同様の問題を抱えていた。
+
+**修正**: `await loadBackgroundSprite()` の直後に `applyFilter()` を追加（`playBtn.onclick` と `node.onExecuted` の2箇所）。
+
+```js
+// playBtn.onclick
+rebuildParticles();
+await loadBackgroundSprite();
+applyFilter();  // ← 追加: bgSprite ロード完了後にフィルターを適用
+animating = true; lastTime = 0; requestAnimationFrame(animate);
+
+// node.onExecuted
+await loadBackgroundSprite();
+applyFilter();  // ← 追加
+if (!animating) pixiApp.render();
+```

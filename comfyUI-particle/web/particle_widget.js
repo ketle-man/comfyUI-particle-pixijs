@@ -552,101 +552,116 @@ app.registerExtension({
         if (!scene || !particleLayer || !filterWrapper) return;
         // 全コンテナのフィルターをクリア
         filterWrapper.filters = [];
+        filterWrapper.filterArea = null;
         particleLayer.filters = [];
+        if (bgSprite) bgSprite.filters = [];
+        if (pixiApp) { pixiApp.stage.filters = []; pixiApp.stage.filterArea = null; }
         const f = filterSettings.type;
         const p = filterSettings.params;
         if (f === "none" || !PIXI.filters) return;
-        // BG+フィルタ ON または particle_type=none → filterWrapper（Y反転なし）にフィルター
-        // → scale.y=-1 の scene にフィルターを掛けると PixiJS の内部テクスチャ座標が崩れるため
-        // それ以外 → particleLayer のみにフィルター（背景に影響させない）
-        const type   = node.widgets?.find(w => w.name === "particle_type")?.value ?? "smoke";
-        const target = (filterOnBg || type === "none") ? filterWrapper : particleLayer;
+        const type = node.widgets?.find(w => w.name === "particle_type")?.value ?? "smoke";
         const PF = PIXI.filters;
         const hexColor = s => parseInt((s ?? "#ffffff").replace("#", ""), 16);
-        let filter;
-        try {
+
+        // フィルターインスタンスを生成するファクトリ（呼ぶたびに新規インスタンスを返す）
+        // 同一インスタンスを複数コンテナに割り当てると内部状態が競合するため毎回生成する
+        function makeFilter() {
           switch (f) {
-            // ---- 基本フィルター ----
             case "glow":
-              filter = new PF.GlowFilter({
+              return new PF.GlowFilter({
                 distance:      p.distance      ?? 15,
                 outerStrength: p.outerStrength ?? 2,
                 color:         hexColor(p.color),
               });
-              break;
             case "bloom":
-              filter = new PF.BloomFilter({
+              return new PF.BloomFilter({
                 blur:       p.blur       ?? 8,
                 threshold:  p.threshold  ?? 0.1,
                 bloomScale: p.brightness ?? 1,
               });
-              break;
             case "kawaseBlur":
-              filter = new PF.KawaseBlurFilter(p.blur ?? 4, p.quality ?? 3);
-              break;
+              return new PF.KawaseBlurFilter(p.blur ?? 4, p.quality ?? 3);
             case "pixelate":
-              filter = new PF.PixelateFilter(p.size ?? 10);
-              break;
+              return new PF.PixelateFilter(p.size ?? 10);
             case "oldFilm":
-              filter = new PF.OldFilmFilter({
+              return new PF.OldFilmFilter({
                 sepia:      p.sepia      ?? 0.5,
                 noise:      p.noise      ?? 0.3,
                 scratch:    p.scratch    ?? 0.4,
                 vignetting: p.vignetting ?? 0.3,
               });
-              break;
             case "crt":
-              filter = new PF.CRTFilter({
+              return new PF.CRTFilter({
                 curvature:    p.curvature    ?? 3,
                 lineWidth:    p.lineWidth    ?? 1,
                 lineContrast: p.lineContrast ?? 0.25,
                 vignetting:   p.vignetting   ?? 0.3,
               });
-              break;
-            // ---- 追加フィルター ----
             case "dot":
-              filter = new PF.DotFilter(p.scale ?? 1, p.angle ?? 5);
-              break;
-            case "dropShadow":
-              filter = new PF.DropShadowFilter({
+              return new PF.DotFilter(p.scale ?? 1, p.angle ?? 5);
+            case "dropShadow": {
+              const fil = new PF.DropShadowFilter({
                 offset: { x: p.offsetX ?? 4, y: p.offsetY ?? 4 },
                 blur:   p.blur  ?? 2,
                 alpha:  p.alpha ?? 0.5,
                 color:  hexColor(p.color ?? "#000000"),
               });
-              break;
+              fil.padding = Math.ceil(
+                Math.max(Math.abs(p.offsetX ?? 4), Math.abs(p.offsetY ?? 4)) + (p.blur ?? 2) * 2
+              ) + 20;
+              return fil;
+            }
             case "motionBlur":
-              filter = new PF.MotionBlurFilter(
+              return new PF.MotionBlurFilter(
                 { x: p.velocityX ?? 0, y: p.velocityY ?? 0 },
                 p.kernelSize ?? 5,
                 p.offset     ?? 0
               );
-              break;
-            case "outline":
-              filter = new PF.OutlineFilter(
+            case "outline": {
+              const fil = new PF.OutlineFilter(
                 p.thickness ?? 1,
                 hexColor(p.color ?? "#000000"),
                 p.quality   ?? 0.1,
                 p.alpha     ?? 1
               );
-              break;
+              fil.padding = Math.ceil(p.thickness ?? 1) * 2 + 4;
+              return fil;
+            }
             case "rgbSplit":
-              filter = new PF.RGBSplitFilter(
+              return new PF.RGBSplitFilter(
                 [p.redX  ?? -2, p.redY  ?? 0],
                 [p.blueX ??  2, p.blueY ?? 0],
                 [0, 0]
               );
-              break;
             case "zoomBlur":
-              filter = new PF.ZoomBlurFilter({
+              return new PF.ZoomBlurFilter({
                 strength:    p.strength    ?? 0.1,
                 center:      { x: (p.centerX ?? 0.5) * currentW, y: (p.centerY ?? 0.5) * currentH },
                 innerRadius: p.innerRadius ?? 0,
               });
-              break;
-            default: return;
+            default: return null;
           }
-          target.filters = [filter];
+        }
+
+        try {
+          if (type === "none") {
+            // particle_type=none: particleLayer が空のため stage に適用
+            const fil = makeFilter();
+            if (!fil) return;
+            pixiApp.stage.filters = [fil];
+            const pad = fil.padding ?? 0;
+            pixiApp.stage.filterArea = new PIXI.Rectangle(-pad, -pad, currentW + pad * 2, currentH + pad * 2);
+          } else {
+            // パーティクルレイヤーに適用（常に）
+            const fil = makeFilter();
+            if (!fil) return;
+            particleLayer.filters = [fil];
+            // BG+Filter: ON かつ bgSprite あり → 背景画像にも個別インスタンスで適用
+            if (filterOnBg && bgSprite) {
+              const filBg = makeFilter();
+              if (filBg) bgSprite.filters = [filBg];
+            }
+          }
         } catch(e) {
           console.warn("[ParticleRenderer] applyFilter failed:", e);
         }
@@ -664,9 +679,9 @@ app.registerExtension({
       }
 
       function applyBgColor() {
-        if (!pixiApp) return;
+        if (!pixiApp || !filterWrapper) return;
         if (bgColorRect) {
-          pixiApp.stage.removeChild(bgColorRect);
+          filterWrapper.removeChild(bgColorRect);
           bgColorRect.destroy();
           bgColorRect = null;
         }
@@ -676,7 +691,7 @@ app.registerExtension({
         bgColorRect.beginFill(hex, 1);
         bgColorRect.drawRect(0, 0, currentW, currentH);
         bgColorRect.endFill();
-        pixiApp.stage.addChildAt(bgColorRect, 0);
+        filterWrapper.addChildAt(bgColorRect, 0);
       }
 
       // ---- バックグラウンド入力画像スプライト (particle_type="none" 時) ----
@@ -727,6 +742,7 @@ app.registerExtension({
         ? { ..._defMotionParams, ...node.properties.particleMotionParams }
         : { ..._defMotionParams };
       let globalStrength         = node.properties?.globalStrength ?? 1.0;
+      let currentBlendMode       = node.properties?.blendMode      ?? "default";
 
       function saveParticleSettings() {
         node.properties = node.properties || {};
@@ -739,6 +755,7 @@ app.registerExtension({
         node.properties.randomParticleShape    = randomParticleShape;
         node.properties.particleMotionParams   = { ...particleMotionParams };
         node.properties.globalStrength         = globalStrength;
+        node.properties.blendMode              = currentBlendMode;
       }
 
       async function loadBackgroundSprite() {
@@ -871,6 +888,15 @@ app.registerExtension({
         return {x:Math.max(PREVIEW_X,Math.min(PREVIEW_X+pw,px)), y:Math.max(py,Math.min(py+ph,py_))};
       }
 
+      // ---- ブレンドモード適用 ----
+      function applyBlendMode() {
+        if (currentBlendMode === "default" || particleSystems.length === 0) return;
+        const bm = PIXI.BLEND_MODES[currentBlendMode] ?? PIXI.BLEND_MODES.NORMAL;
+        for (const ps of particleSystems) {
+          for (const sprite of ps.particles) sprite.blendMode = bm;
+        }
+      }
+
       // ---- パーティクル再構築 ----
       function rebuildParticles(overrides = null) {
         for (const ps of particleSystems) ps.dispose();
@@ -912,6 +938,7 @@ app.registerExtension({
           ));
         }
         applyFilter();
+        applyBlendMode();
       }
 
       // ---- キャプチャ送信 ----
@@ -1283,6 +1310,7 @@ app.registerExtension({
         }
         rebuildParticles();
         await loadBackgroundSprite();
+        applyFilter();
         animating=true; lastTime=0; requestAnimationFrame(animate);
       };
 
@@ -1432,6 +1460,35 @@ app.registerExtension({
       };
       btnRow2.appendChild(filterOnBgBtn);
 
+      // ブレンドモード ドロップダウン
+      const blendModeSelect = document.createElement("select");
+      blendModeSelect.title = t("blendMode");
+      blendModeSelect.style.cssText =
+        "background:#2a2a3a;color:#ccc;border:1px solid #555;border-radius:4px;" +
+        "font-size:11px;padding:2px 4px;cursor:pointer;height:26px;";
+      const BLEND_OPTIONS = [
+        ["default",  t("blendDefault")],
+        ["NORMAL",   t("blendNormal")],
+        ["ADD",      t("blendAdd")],
+        ["MULTIPLY", t("blendMultiply")],
+        ["SCREEN",   t("blendScreen")],
+      ];
+      for (const [val, label] of BLEND_OPTIONS) {
+        const opt = document.createElement("option");
+        opt.value = val; opt.textContent = label;
+        if (val === currentBlendMode) opt.selected = true;
+        blendModeSelect.appendChild(opt);
+      }
+      blendModeSelect.addEventListener("change", () => {
+        currentBlendMode = blendModeSelect.value;
+        node.properties = node.properties || {};
+        node.properties.blendMode = currentBlendMode;
+        applyBlendMode();
+        if (!animating && pixiApp) pixiApp.render();
+        node.setDirtyCanvas(true, false);
+      });
+      btnRow2.appendChild(blendModeSelect);
+
       btnContainer.appendChild(btnRow1);
       btnContainer.appendChild(btnRow2);
 
@@ -1503,6 +1560,10 @@ app.registerExtension({
           filterOnBgBtn.textContent = filterOnBg ? t("bgFilterOn") : t("bgFilterOff");
           filterOnBgBtn.style.background = filterOnBg ? "#4a4a8a" : "#333344";
         }
+        if (node.properties?.blendMode !== undefined) {
+          currentBlendMode = node.properties.blendMode;
+          blendModeSelect.value = currentBlendMode;
+        }
         if (node.properties?.particleTextures !== undefined) {
           customParticleTextures = (node.properties.particleTextures ?? []).map(t => ({ ...t, tex: null }));
         } else if (node.properties?.particleTextureUrl) {
@@ -1556,6 +1617,7 @@ app.registerExtension({
         origOnExecuted?.apply(this, arguments);
         if (pixiApp && filterOnBg) {
           await loadBackgroundSprite();
+          applyFilter();
           if (!animating) pixiApp.render();
           node.setDirtyCanvas(true, false);
         }
