@@ -122,8 +122,9 @@ const TRANSLATIONS = {
     scatterModeOff:     "✦ Scatter: OFF",
     scatterModeTitle:   "Toggle random scatter across the entire canvas",
     charShapeLabel:     "Text Characters",
-    charShapePlaceholder: "e.g. A,B,C,1,2,3",
+    charShapePlaceholder: "e.g. A,B,C,1,2,3,!,★",
     charShapeDesc:      "Generate random characters as particles (overrides shape preset)",
+    charShapeSymbols:   "[!?#:]",
     charShapeClear:     "× Clear",
   },
 
@@ -248,8 +249,9 @@ const TRANSLATIONS = {
     scatterModeOff:     "✦ 全面散布: OFF",
     scatterModeTitle:   "キャンバス全体でランダム発生のON/OFF",
     charShapeLabel:     "テキスト文字",
-    charShapePlaceholder: "例: A,B,C,1,2,3",
+    charShapePlaceholder: "例: A,B,C,1,2,3,!,★",
     charShapeDesc:      "文字をパーティクルとしてランダム発生（シェイププリセットより優先）",
+    charShapeSymbols:   "[!?#:]",
     charShapeClear:     "× クリア",
   },
 
@@ -374,8 +376,9 @@ const TRANSLATIONS = {
     scatterModeOff:     "✦ 全面散布: OFF",
     scatterModeTitle:   "全画布随机生成粒子 ON/OFF",
     charShapeLabel:     "文字字符",
-    charShapePlaceholder: "例: A,B,C,1,2,3",
+    charShapePlaceholder: "例: A,B,C,1,2,3,!,★",
     charShapeDesc:      "将字符作为粒子随机生成（优先于形状预设）",
+    charShapeSymbols:   "[!?#:]",
     charShapeClear:     "× 清除",
   },
 };

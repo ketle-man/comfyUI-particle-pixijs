@@ -1699,6 +1699,21 @@ app.registerExtension({
         }
       };
 
+      // image 入力が切断されたら bgSprite を即時クリア
+      const origOnConnectionsChange = node.onConnectionsChange;
+      node.onConnectionsChange = function(type, slotIndex, isConnected) {
+        origOnConnectionsChange?.apply(this, arguments);
+        if (type === 1 && !isConnected && node.inputs?.[slotIndex]?.name === "image") {
+          if (bgSprite && filterWrapper) {
+            filterWrapper.removeChild(bgSprite);
+            bgSprite.destroy();
+            bgSprite = null;
+          }
+          if (pixiApp && !animating) pixiApp.render();
+          node.setDirtyCanvas(true, false);
+        }
+      };
+
       const origOnRemoved=node.onRemoved;
       node.onRemoved=function(){
         origOnRemoved?.apply(this,arguments);

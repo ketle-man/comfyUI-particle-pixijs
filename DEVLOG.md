@@ -954,3 +954,65 @@ comfyUI-particle-pixijs/
 ```
 
 **理由**: `ComfyUI/custom_nodes/` 直下に `git clone` した場合、ComfyUI はリポジトリルートの `__init__.py` を探す。サブフォルダに格納されていると認識されないため、ルートに配置する必要があった。
+
+---
+
+### バグ修正: image 入力切断後も背景画像が残り続ける問題
+
+**症状**: ノードの `image` 入力の接続を切断しても、プレビューに背景画像が表示されたまま残る。
+
+**根本原因**: `image` 入力の接続変更を検知するフックが存在せず、切断時に `bgSprite` を除去するトリガーがなかった。`loadBackgroundSprite()` は Play ボタン・BG+Filter トグル・`onExecuted` の3箇所でのみ呼ばれるため、単純な切断操作では実行されない。
+
+**修正**: `onConnectionsChange` フックを追加し、`image` スロットが切断されたタイミングで即座に `bgSprite` を `destroy()` して除去する。
+
+```js
+node.onConnectionsChange = function(type, slotIndex, isConnected) {
+  origOnConnectionsChange?.apply(this, arguments);
+  if (type === 1 && !isConnected && node.inputs?.[slotIndex]?.name === "image") {
+    if (bgSprite && filterWrapper) {
+      filterWrapper.removeChild(bgSprite);
+      bgSprite.destroy();
+      bgSprite = null;
+    }
+    if (pixiApp && !animating) pixiApp.render();
+    node.setDirtyCanvas(true, false);
+  }
+};
+```
+
+- `type === 1`: 入力スロットの変更
+- `!isConnected`: 切断イベント
+- `node.inputs?.[slotIndex]?.name === "image"`: image スロットの特定
+
+---
+
+### 文字シェイプに記号を追加（48記号対応）
+
+**目的**: 既存の英数字シェイプに加えて、記号文字をパーティクルシェイプとして使用できるようにする。
+
+**追加内容**:
+
+`[!?#:]` ボタンを `[0-9]` の右隣に追加。クリックすると以下の48記号をテキストボックスに一括設定する。
+
+| 種類 | 記号 |
+|------|------|
+| ASCII記号（31） | `! " # $ % & ' ( ) * + - . / : ; < = > ? @ [ \ ] ^ _ ` { \| } ~` |
+| Unicode記号（17） | `★ ☆ ♪ ♥ ♦ ♣ ♠ → ← ↑ ↓ ≠ ≤ ≥ ± ∞ ×` |
+
+※ カンマはセパレーターとして使用しているため除外。
+
+**`filter_library.js` 変更**:
+- `SYMBOL_SET` 定数（配列 → `.join(",")` でカンマ区切り文字列）を定義
+- `charSymBtn` ボタンを追加
+- `updateCharSet()` のフィルター正規表現を拡張:
+  ```js
+  // 変更前: 英数字のみ
+  .filter(s => /^[A-Za-z0-9]$/.test(s));
+  // 変更後: 制御文字・空白・カンマ以外の任意の1文字
+  .filter(s => s.length === 1 && /^[^\x00-\x1F\x7F\s,]$/.test(s));
+  ```
+  これによりテキストボックスへの直接入力でも記号・Unicodeを使用可能になった。
+
+**`i18n.js` 変更**:
+- `charShapeSymbols: "[!?#:]"` を en/ja/zh に追加
+- `charShapePlaceholder` を `"例: A,B,C,1,2,3,!,★"` に更新（記号対応を示す）

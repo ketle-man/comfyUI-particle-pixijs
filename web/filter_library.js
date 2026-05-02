@@ -577,11 +577,19 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
       const chars = charInput.value
         .split(",")
         .map(s => s.trim())
-        .filter(s => /^[A-Za-z0-9]$/.test(s));
+        .filter(s => s.length === 1 && /^[^\x00-\x1F\x7F\s,]$/.test(s));
       tempParticle.charSet = [...new Set(chars)];
       notifyParticle();
     }
     charInput.addEventListener("input", updateCharSet);
+
+    const SYMBOL_SET = [
+      '!', '"', '#', '$', '%', '&', "'", '(', ')',
+      '*', '+', '-', '.', '/', ':', ';', '<', '=', '>', '?', '@',
+      '[', '\\', ']', '^', '_', '`', '{', '|', '}', '~',
+      '★', '☆', '♪', '♥', '♦', '♣', '♠', '→', '←', '↑', '↓',
+      '≠', '≤', '≥', '±', '∞', '×',
+    ].join(',');
 
     const charBtnRow = el("div", { style: "display:flex;gap:4px;flex-wrap:wrap;" });
 
@@ -595,13 +603,18 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
       charInput.value = "0,1,2,3,4,5,6,7,8,9";
       updateCharSet();
     };
+    const charSymBtn = mkBtn(t("charShapeSymbols"), "#2a4a5a");
+    charSymBtn.onclick = () => {
+      charInput.value = SYMBOL_SET;
+      updateCharSet();
+    };
     const charClrBtn = mkBtn(t("charShapeClear"), "#383838");
     charClrBtn.onclick = () => {
       charInput.value = "";
       updateCharSet();
     };
 
-    charBtnRow.append(charAZBtn, char09Btn, charClrBtn);
+    charBtnRow.append(charAZBtn, char09Btn, charSymBtn, charClrBtn);
     charSection.append(charInput, charBtnRow);
     rightPanel.appendChild(charSection);
 
