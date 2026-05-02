@@ -120,6 +120,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     randomShape:    particleSettings?.randomShape    ?? false,
     motionParams:   { ..._defMotion, ...(particleSettings?.motionParams ?? {}) },
     globalStrength: particleSettings?.globalStrength ?? 1.0,
+    charSet:        particleSettings?.charSet ?? [],
   };
   let tempParticle = JSON.parse(JSON.stringify(origParticle));
   const notifyParticle = () => onParticlePreview?.(JSON.parse(JSON.stringify(tempParticle)));
@@ -214,6 +215,19 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   particleParamsItem.addEventListener("click", () => selectParticleParams());
   leftPanel.appendChild(particleParamsItem);
 
+  const particleMotionItem = el("div", {
+    style: "padding:7px 12px;cursor:pointer;font-size:12px;transition:background 0.1s;" +
+           "border-left:3px solid transparent;user-select:none;",
+  }, t("motionSettings"));
+  particleMotionItem.addEventListener("mouseenter", () => {
+    if (currentKey !== "particle_motion") particleMotionItem.style.background = "#252545";
+  });
+  particleMotionItem.addEventListener("mouseleave", () => {
+    if (currentKey !== "particle_motion") particleMotionItem.style.background = "";
+  });
+  particleMotionItem.addEventListener("click", () => selectParticleMotion());
+  leftPanel.appendChild(particleMotionItem);
+
   function highlightList(activeKey) {
     for (const [k, item] of Object.entries(filterItems)) {
       const sel = k === activeKey;
@@ -229,6 +243,10 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     particleParamsItem.style.background      = ppSel ? "#2a2a5a" : "";
     particleParamsItem.style.borderLeftColor = ppSel ? "#da8a4a" : "transparent";
     particleParamsItem.style.color           = ppSel ? "#ffccaa" : "#ccc";
+    const pmSel = activeKey === "particle_motion";
+    particleMotionItem.style.background      = pmSel ? "#2a2a5a" : "";
+    particleMotionItem.style.borderLeftColor = pmSel ? "#da8a4a" : "transparent";
+    particleMotionItem.style.color           = pmSel ? "#ffccaa" : "#ccc";
   }
 
   // ── 中央パネル: プレビュー ──
@@ -533,64 +551,60 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     randShapeWrap.appendChild(randShapeRow);
     rightPanel.appendChild(randShapeWrap);
 
-    // ---- モーション設定 ----
-    rightPanel.appendChild(el("div", {
-      style: "font-size:12px;font-weight:bold;color:#aac8ff;margin-top:14px;margin-bottom:8px;" +
-             "border-top:1px solid #2a2a4a;padding-top:10px;",
-    }, t("motionSettings")));
+    // ---- テキスト文字シェイプ ----
+    const charSection = el("div", {
+      style: "margin-top:12px;border-top:1px solid #2a2a4a;padding-top:10px;",
+    });
+    charSection.appendChild(el("div", {
+      style: "font-size:11px;color:#99a;margin-bottom:3px;",
+    }, t("charShapeLabel")));
+    charSection.appendChild(el("div", {
+      style: "font-size:10px;color:#556;margin-bottom:6px;line-height:1.5;",
+    }, t("charShapeDesc")));
 
-    const MOTION_PARAMS_DEF = [
-      { key: "turbulence", labelKey: "paramTurbulence", min: 0,    max: 5,    step: 0.1, def: 0 },
-      { key: "turbFreq",   labelKey: "paramTurbFreq",   min: 0.1,  max: 10,   step: 0.1, def: 1 },
-      { key: "windX",      labelKey: "paramWindX",       min: -200, max: 200,  step: 1,   def: 0 },
-      { key: "windY",      labelKey: "paramWindY",       min: -200, max: 200,  step: 1,   def: 0 },
-      { key: "swirl",      labelKey: "paramSwirl",       min: -5,   max: 5,    step: 0.1, def: 0 },
-    ];
+    const charInput = document.createElement("input");
+    charInput.type = "text";
+    charInput.placeholder = t("charShapePlaceholder");
+    charInput.value = (tempParticle.charSet ?? []).join(",");
+    charInput.style.cssText =
+      "width:100%;box-sizing:border-box;background:#111;border:1px solid #444;color:#ddd;" +
+      "padding:4px 6px;border-radius:4px;font-size:12px;margin-bottom:6px;" +
+      "appearance:textfield;";
+    charInput.addEventListener("wheel",   e => e.stopPropagation(), { passive: true });
+    charInput.addEventListener("keydown", e => e.stopPropagation());
 
-    if (!tempParticle.motionParams) tempParticle.motionParams = { ..._defMotion };
-
-    for (const p of MOTION_PARAMS_DEF) {
-      const rowWrap = el("div", { style: "margin-bottom:10px;" });
-      rowWrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:3px;" }, t(p.labelKey)));
-      const slRow = el("div", { style: "display:flex;align-items:center;gap:6px;" });
-
-      const curVal = tempParticle.motionParams[p.key] ?? p.def;
-      const dec = p.step < 0.1 ? 2 : (p.step < 1 ? 1 : 0);
-
-      const sl = document.createElement("input");
-      sl.type = "range"; sl.min = p.min; sl.max = p.max; sl.step = p.step; sl.value = curVal;
-      sl.style.cssText = "flex:1;height:14px;accent-color:#4a90d9;cursor:pointer;min-width:60px;";
-      sl.addEventListener("wheel", e => e.stopPropagation(), { passive: true });
-
-      const numInp = document.createElement("input");
-      numInp.type = "number"; numInp.min = p.min; numInp.max = p.max; numInp.step = p.step;
-      numInp.value = parseFloat(curVal).toFixed(dec);
-      numInp.style.cssText =
-        "width:56px;background:#111;border:1px solid #444;color:#ddd;" +
-        "padding:2px 5px;border-radius:4px;font-size:11px;text-align:right;" +
-        "appearance:textfield;-moz-appearance:textfield;";
-      numInp.addEventListener("wheel",   e => e.stopPropagation(), { passive: true });
-      numInp.addEventListener("keydown", e => e.stopPropagation());
-
-      sl.addEventListener("input", () => {
-        const v = parseFloat(sl.value);
-        numInp.value = v.toFixed(dec);
-        tempParticle.motionParams[p.key] = v;
-        notifyParticle();
-      });
-      numInp.addEventListener("change", () => {
-        let v = parseFloat(numInp.value);
-        if (isNaN(v)) { numInp.value = parseFloat(sl.value).toFixed(dec); return; }
-        v = Math.max(p.min, Math.min(p.max, v));
-        numInp.value = v.toFixed(dec); sl.value = v;
-        tempParticle.motionParams[p.key] = v;
-        notifyParticle();
-      });
-
-      slRow.append(sl, numInp);
-      rowWrap.appendChild(slRow);
-      rightPanel.appendChild(rowWrap);
+    function updateCharSet() {
+      const chars = charInput.value
+        .split(",")
+        .map(s => s.trim())
+        .filter(s => /^[A-Za-z0-9]$/.test(s));
+      tempParticle.charSet = [...new Set(chars)];
+      notifyParticle();
     }
+    charInput.addEventListener("input", updateCharSet);
+
+    const charBtnRow = el("div", { style: "display:flex;gap:4px;flex-wrap:wrap;" });
+
+    const charAZBtn = mkBtn("[A-Z]", "#2a4a5a");
+    charAZBtn.onclick = () => {
+      charInput.value = Array.from({length: 26}, (_, i) => String.fromCharCode(65 + i)).join(",");
+      updateCharSet();
+    };
+    const char09Btn = mkBtn("[0-9]", "#2a4a5a");
+    char09Btn.onclick = () => {
+      charInput.value = "0,1,2,3,4,5,6,7,8,9";
+      updateCharSet();
+    };
+    const charClrBtn = mkBtn(t("charShapeClear"), "#383838");
+    charClrBtn.onclick = () => {
+      charInput.value = "";
+      updateCharSet();
+    };
+
+    charBtnRow.append(charAZBtn, char09Btn, charClrBtn);
+    charSection.append(charInput, charBtnRow);
+    rightPanel.appendChild(charSection);
+
   }
 
   // ---- パーティクルパラメーターパネル（回転・ランダム回転・ランダムスケール） ----
@@ -752,6 +766,72 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     }, t("particleSettingsNote")));
   }
 
+  // ---- モーション設定パネル ----
+  function buildMotionPanel() {
+    rightPanel.replaceChildren();
+
+    rightPanel.appendChild(el("div", {
+      style: "font-size:14px;font-weight:bold;color:#ffccaa;padding-bottom:5px;" +
+             "border-bottom:1px solid #333;margin-bottom:4px;",
+    }, t("motionSettings")));
+    rightPanel.appendChild(el("div", {
+      style: "font-size:11px;color:#778;margin-bottom:14px;",
+    }, t("particleMotionDesc")));
+
+    const MOTION_PARAMS_DEF = [
+      { key: "turbulence", labelKey: "paramTurbulence", min: 0,    max: 5,    step: 0.1, def: 0 },
+      { key: "turbFreq",   labelKey: "paramTurbFreq",   min: 0.1,  max: 10,   step: 0.1, def: 1 },
+      { key: "windX",      labelKey: "paramWindX",       min: -200, max: 200,  step: 1,   def: 0 },
+      { key: "windY",      labelKey: "paramWindY",       min: -200, max: 200,  step: 1,   def: 0 },
+      { key: "swirl",      labelKey: "paramSwirl",       min: -5,   max: 5,    step: 0.1, def: 0 },
+    ];
+
+    if (!tempParticle.motionParams) tempParticle.motionParams = { ..._defMotion };
+
+    for (const p of MOTION_PARAMS_DEF) {
+      const rowWrap = el("div", { style: "margin-bottom:10px;" });
+      rowWrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:3px;" }, t(p.labelKey)));
+      const slRow = el("div", { style: "display:flex;align-items:center;gap:6px;" });
+
+      const curVal = tempParticle.motionParams[p.key] ?? p.def;
+      const dec = p.step < 0.1 ? 2 : (p.step < 1 ? 1 : 0);
+
+      const sl = document.createElement("input");
+      sl.type = "range"; sl.min = p.min; sl.max = p.max; sl.step = p.step; sl.value = curVal;
+      sl.style.cssText = "flex:1;height:14px;accent-color:#4a90d9;cursor:pointer;min-width:60px;";
+      sl.addEventListener("wheel", e => e.stopPropagation(), { passive: true });
+
+      const numInp = document.createElement("input");
+      numInp.type = "number"; numInp.min = p.min; numInp.max = p.max; numInp.step = p.step;
+      numInp.value = parseFloat(curVal).toFixed(dec);
+      numInp.style.cssText =
+        "width:56px;background:#111;border:1px solid #444;color:#ddd;" +
+        "padding:2px 5px;border-radius:4px;font-size:11px;text-align:right;" +
+        "appearance:textfield;-moz-appearance:textfield;";
+      numInp.addEventListener("wheel",   e => e.stopPropagation(), { passive: true });
+      numInp.addEventListener("keydown", e => e.stopPropagation());
+
+      sl.addEventListener("input", () => {
+        const v = parseFloat(sl.value);
+        numInp.value = v.toFixed(dec);
+        tempParticle.motionParams[p.key] = v;
+        notifyParticle();
+      });
+      numInp.addEventListener("change", () => {
+        let v = parseFloat(numInp.value);
+        if (isNaN(v)) { numInp.value = parseFloat(sl.value).toFixed(dec); return; }
+        v = Math.max(p.min, Math.min(p.max, v));
+        numInp.value = v.toFixed(dec); sl.value = v;
+        tempParticle.motionParams[p.key] = v;
+        notifyParticle();
+      });
+
+      slRow.append(sl, numInp);
+      rowWrap.appendChild(slRow);
+      rightPanel.appendChild(rowWrap);
+    }
+  }
+
   // ---- Footer ----
   const footer = el("div", {
     style: "display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 14px;" +
@@ -800,6 +880,12 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     currentKey = "particle_params";
     highlightList("particle_params");
     buildParticleParamsPanel();
+  }
+
+  function selectParticleMotion() {
+    currentKey = "particle_motion";
+    highlightList("particle_motion");
+    buildMotionPanel();
   }
 
   // ---- クリーンアップ ----

@@ -160,6 +160,16 @@ function _drawShape(ctx, shapeType) {
       shapeType === "star_fill" ? ctx.fill() : ctx.stroke();
       break;
     }
+    default: {
+      if (shapeType && shapeType.startsWith("char_")) {
+        const ch = shapeType.slice(5);
+        ctx.font = "bold 52px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(ch, 32, 34);
+      }
+      break;
+    }
   }
 }
 
@@ -179,7 +189,7 @@ function getShapeTexture(PIXI, shapeType) {
 // パーティクルシステム基底 (PIXIJS)
 // ================================================================
 class ParticleSystem {
-  constructor(scene, PIXI, renderer, count, gradientFn, origin, direction, particleSize, strength, customTextures = null, particleRotation = 0, randomParticleRotation = false, randomScale = false, shapePreset = "default", randomShape = false, motionParams = null, spread = 1.0) {
+  constructor(scene, PIXI, renderer, count, gradientFn, origin, direction, particleSize, strength, customTextures = null, particleRotation = 0, randomParticleRotation = false, randomScale = false, shapePreset = "default", randomShape = false, motionParams = null, spread = 1.0, scatterMode = false, charSet = []) {
     this.PIXI = PIXI; this.scene = scene; this.renderer = renderer; this.count = count;
     this.gradientFn = gradientFn; this.origin = origin; this.direction = direction;
     this.particleSize = particleSize; this.strength = strength;
@@ -196,6 +206,8 @@ class ParticleSystem {
     this.randomShape            = randomShape;
     this.motionParams           = motionParams || {};
     this.spread                 = spread;
+    this.scatterMode            = scatterMode;
+    this.charSet                = (charSet && charSet.length > 0) ? charSet : null;
     this.init();
   }
   init(){} update(delta){}
@@ -216,6 +228,10 @@ class ParticleSystem {
   _pickTex(i) {
     if (this.customTextures) {
       return this.customTextures[Math.floor(Math.random() * this.customTextures.length)];
+    }
+    if (this.charSet) {
+      const ch = this.charSet[Math.floor(Math.random() * this.charSet.length)];
+      return getShapeTexture(this.PIXI, `char_${ch}`);
     }
     if (this.randomShape) {
       return getShapeTexture(this.PIXI,
@@ -271,7 +287,9 @@ class SmokeSystem extends ParticleSystem {
   }
   _resetParticle(i) {
     const sprite = this.particles[i];
-    const ox=this.origin.x, oy=this.origin.y, dir=this.direction;
+    const ox = this.scatterMode ? (Math.random() - 0.5) * this.renderer.width  : this.origin.x;
+    const oy = this.scatterMode ? (Math.random() - 0.5) * this.renderer.height : this.origin.y;
+    const dir=this.direction;
     sprite.position.set(ox+(Math.random()-.5)*40, oy+(Math.random()-.5)*12);
     
     const spd=(30+Math.random()*20)*this.strength, a=dir+(Math.random()-.5)*.5*(this.spread??1);
@@ -302,7 +320,8 @@ class SparkSystem extends ParticleSystem {
   }
   _resetParticle(i) {
     const sprite = this.particles[i];
-    const ox=this.origin.x, oy=this.origin.y;
+    const ox = this.scatterMode ? (Math.random() - 0.5) * this.renderer.width  : this.origin.x;
+    const oy = this.scatterMode ? (Math.random() - 0.5) * this.renderer.height : this.origin.y;
     const angle=this.direction+(Math.random()-.5)*1.2*(this.spread??1);
     const speed=(40+Math.random()*120)*this.strength;
     sprite.position.set(ox+(Math.random()-.5)*10, oy+(Math.random()-.5)*10);
@@ -334,7 +353,8 @@ class RaySystem extends ParticleSystem {
   }
   _resetParticle(i) {
     const sprite = this.particles[i];
-    const ox=this.origin.x, oy=this.origin.y;
+    const ox = this.scatterMode ? (Math.random() - 0.5) * this.renderer.width  : this.origin.x;
+    const oy = this.scatterMode ? (Math.random() - 0.5) * this.renderer.height : this.origin.y;
     const angle=this.direction+(Math.random()-.5)*.6*(this.spread??1);
     const speed=(60+Math.random()*140)*this.strength;
     sprite.position.set(ox, oy);
@@ -465,8 +485,8 @@ class NoneSystem extends ParticleSystem {
   update(_dt)  {}
 }
 
-function createParticleSystem(type,scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,customTextures=null,particleRotation=0,randomParticleRotation=false,randomScale=false,shapePreset="default",randomShape=false,motionParams=null,spread=1.0) {
-  const ex = [customTextures, particleRotation, randomParticleRotation, randomScale, shapePreset, randomShape, motionParams, spread];
+function createParticleSystem(type,scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,customTextures=null,particleRotation=0,randomParticleRotation=false,randomScale=false,shapePreset="default",randomShape=false,motionParams=null,spread=1.0,scatterMode=false,charSet=[]) {
+  const ex = [customTextures, particleRotation, randomParticleRotation, randomScale, shapePreset, randomShape, motionParams, spread, scatterMode, charSet];
   switch(type) {
     case "none":      return new NoneSystem     (scene,PIXI,renderer,0,    gradientFn,origin,direction,size,strength,...ex);
     case "smoke":     return new SmokeSystem    (scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,...ex);
@@ -743,6 +763,13 @@ app.registerExtension({
         : { ..._defMotionParams };
       let globalStrength         = node.properties?.globalStrength ?? 1.0;
       let currentBlendMode       = node.properties?.blendMode      ?? "default";
+      let scatterMode            = node.properties?.scatterMode    ?? false;
+      let particleCharSet        = node.properties?.particleCharSet ?? [];
+
+      function saveScatterMode() {
+        node.properties = node.properties || {};
+        node.properties.scatterMode = scatterMode;
+      }
 
       function saveParticleSettings() {
         node.properties = node.properties || {};
@@ -756,6 +783,7 @@ app.registerExtension({
         node.properties.particleMotionParams   = { ...particleMotionParams };
         node.properties.globalStrength         = globalStrength;
         node.properties.blendMode              = currentBlendMode;
+        node.properties.particleCharSet        = particleCharSet;
       }
 
       async function loadBackgroundSprite() {
@@ -934,7 +962,7 @@ app.registerExtension({
           particleSystems.push(createParticleSystem(
             type, particleLayer, PIXI, pixiApp.renderer, countPerEm, gradientFn,
             em.origin, em.direction, _size, getStrength(em) * _gs,
-            _texsArr, _rot, _randRot, _randSc, _shape, _randSh, _motion, _spread
+            _texsArr, _rot, _randRot, _randSc, _shape, _randSh, _motion, _spread, scatterMode, particleCharSet
           ));
         }
         applyFilter();
@@ -1309,6 +1337,25 @@ app.registerExtension({
           await loadCustomTextures();
         }
         rebuildParticles();
+
+        // filterOnBg=ON または type=none で image 接続がある場合は
+        // queuePrompt で Python を先に実行し input_images を最新化してから背景を読む
+        const _type = node.widgets?.find(w=>w.name==="particle_type")?.value??"smoke";
+        const _hasImageLink = node.inputs?.find(inp=>inp.name==="image")?.link != null;
+        if (_hasImageLink && (filterOnBg || _type === "none")) {
+          await new Promise(resolve => {
+            const timer = setTimeout(resolve, 8000); // 8秒でタイムアウト
+            const prev = node.onExecuted;
+            node.onExecuted = async function(data) {
+              clearTimeout(timer);
+              node.onExecuted = prev;
+              await prev?.apply(this, arguments);
+              resolve();
+            };
+            app.queuePrompt(0);
+          });
+        }
+
         await loadBackgroundSprite();
         applyFilter();
         animating=true; lastTime=0; requestAnimationFrame(animate);
@@ -1322,6 +1369,15 @@ app.registerExtension({
         for (const ps of particleSystems) ps.update(0);
         try { await sendCapture(); app.queuePrompt(0); }
         catch(e) { console.error("[ParticleRenderer] capture failed:", e); }
+      };
+
+      const scatterBtn = makeSmallButton(scatterMode ? t("scatterModeOn") : t("scatterModeOff"), scatterMode ? "#8a4a8a" : "#333344", t("scatterModeTitle"));
+      scatterBtn.onclick = () => {
+        scatterMode = !scatterMode;
+        scatterBtn.textContent = scatterMode ? t("scatterModeOn") : t("scatterModeOff");
+        scatterBtn.style.background = scatterMode ? "#8a4a8a" : "#333344";
+        saveScatterMode();
+        if (animating) rebuildParticles();
       };
 
       // 背景色トグルボタン
@@ -1351,12 +1407,15 @@ app.registerExtension({
 
       btnRow1.appendChild(playBtn);
       btnRow1.appendChild(stopBtn);
-      btnRow1.appendChild(bgToggleBtn);
-      btnRow1.appendChild(bgColorInput);
+      btnRow1.appendChild(scatterBtn);
 
-      // ---- 2行目: フィルタライブラリ + 将来の機能追加用スペース ----
+      // ---- 2行目: フィルタライブラリ（左）+ 背景色（右端）----
       const btnRow2 = document.createElement("div");
-      btnRow2.style.cssText = "display:flex;gap:4px;align-items:center;flex-wrap:wrap;";
+      btnRow2.style.cssText = "display:flex;gap:4px;align-items:center;justify-content:space-between;flex-wrap:wrap;";
+      const btnRow2Left  = document.createElement("div");
+      btnRow2Left.style.cssText  = "display:flex;gap:4px;align-items:center;";
+      const btnRow2Right = document.createElement("div");
+      btnRow2Right.style.cssText = "display:flex;gap:4px;align-items:center;";
 
       const filterLibBtn = makeSmallButton(t("filterLibrary"), "#4a4a8a", t("filterLibraryTitle"));
       filterLibBtn.onclick = () => {
@@ -1374,6 +1433,7 @@ app.registerExtension({
             randomShape:    randomParticleShape,
             motionParams:   { ...particleMotionParams },
             globalStrength: globalStrength,
+            charSet:        [...particleCharSet],
           },
           onPreview: settings => {
             filterSettings.type   = settings.type;
@@ -1405,6 +1465,7 @@ app.registerExtension({
             randomParticleShape       = particleSets.randomShape   ?? false;
             particleMotionParams      = { ..._defMotionParams, ...(particleSets.motionParams ?? {}) };
             globalStrength            = particleSets.globalStrength ?? 1.0;
+            particleCharSet           = particleSets.charSet ?? [];
             node.properties = node.properties || {};
             node.properties.particleTextures = customParticleTextures.map(t => ({ url: t.url, name: t.name }));
             delete node.properties.particleTextureUrl; // 旧形式を削除
@@ -1440,7 +1501,7 @@ app.registerExtension({
           },
         });
       };
-      btnRow2.appendChild(filterLibBtn);
+      btnRow2Left.appendChild(filterLibBtn);
 
       // 背景画像＋パーティクルにまとめてフィルターを適用するトグル
       const filterOnBgBtn = makeSmallButton(
@@ -1458,7 +1519,7 @@ app.registerExtension({
         if (!animating && pixiApp) pixiApp.render();
         node.setDirtyCanvas(true, false);
       };
-      btnRow2.appendChild(filterOnBgBtn);
+      btnRow2Left.appendChild(filterOnBgBtn);
 
       // ブレンドモード ドロップダウン
       const blendModeSelect = document.createElement("select");
@@ -1487,7 +1548,13 @@ app.registerExtension({
         if (!animating && pixiApp) pixiApp.render();
         node.setDirtyCanvas(true, false);
       });
-      btnRow2.appendChild(blendModeSelect);
+      btnRow2Left.appendChild(blendModeSelect);
+
+      btnRow2Right.appendChild(bgToggleBtn);
+      btnRow2Right.appendChild(bgColorInput);
+
+      btnRow2.appendChild(btnRow2Left);
+      btnRow2.appendChild(btnRow2Right);
 
       btnContainer.appendChild(btnRow1);
       btnContainer.appendChild(btnRow2);
@@ -1564,6 +1631,11 @@ app.registerExtension({
           currentBlendMode = node.properties.blendMode;
           blendModeSelect.value = currentBlendMode;
         }
+        if (node.properties?.scatterMode !== undefined) {
+          scatterMode = node.properties.scatterMode;
+          scatterBtn.textContent = scatterMode ? t("scatterModeOn") : t("scatterModeOff");
+          scatterBtn.style.background = scatterMode ? "#8a4a8a" : "#333344";
+        }
         if (node.properties?.particleTextures !== undefined) {
           customParticleTextures = (node.properties.particleTextures ?? []).map(t => ({ ...t, tex: null }));
         } else if (node.properties?.particleTextureUrl) {
@@ -1597,6 +1669,9 @@ app.registerExtension({
         if (node.properties?.globalStrength !== undefined) {
           globalStrength = node.properties.globalStrength;
         }
+        if (node.properties?.particleCharSet !== undefined) {
+          particleCharSet = node.properties.particleCharSet;
+        }
         // COLOR widget の null 値を確実に修正する（標準 + MTB 両方）
         const col = colorStops[selectedStopIdx]?.color;
         node.widgets?.forEach(w => {
@@ -1615,7 +1690,8 @@ app.registerExtension({
       const origOnExecuted = node.onExecuted;
       node.onExecuted = async function(data) {
         origOnExecuted?.apply(this, arguments);
-        if (pixiApp && filterOnBg) {
+        const curType = node.widgets?.find(w => w.name === "particle_type")?.value ?? "smoke";
+        if (pixiApp && (filterOnBg || curType === "none")) {
           await loadBackgroundSprite();
           applyFilter();
           if (!animating) pixiApp.render();

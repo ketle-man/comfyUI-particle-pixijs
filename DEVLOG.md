@@ -141,12 +141,19 @@ ComfyUI カスタムノード。Three.js を使用してパーティクルをキ
 
 ### ファイル構成
 
+`ComfyUI/custom_nodes/comfyUI-particle-pixijs/` 直下がリポジトリルートになっている（サブフォルダなし）。
+
 ```
-comfyUI-particle/
-├── __init__.py            # ノード登録・WEB_DIRECTORY
-├── particle_node.py       # Python ノードクラス・capture API
+comfyUI-particle-pixijs/          ← git clone 先 / ComfyUI custom_nodes フォルダに直置き
+├── __init__.py                   # ノード登録・WEB_DIRECTORY = "./web"
+├── particle_node.py              # Python ノードクラス・capture / input API
+├── DEVLOG.md
+├── README.md
+├── docs/images/                  # スクリーンショット等
 └── web/
-    └── particle_widget.js # LiteGraph 拡張・Three.js UI
+    ├── particle_widget.js        # LiteGraph 拡張・PixiJS UI メイン
+    ├── filter_library.js         # フィルタライブラリモーダル
+    └── i18n.js                   # 多言語対応（en / ja / zh）
 ```
 
 ### レイアウトスタック（onDrawForeground 描画順）
@@ -764,3 +771,186 @@ await loadBackgroundSprite();
 applyFilter();  // ← 追加
 if (!animating) pixiApp.render();
 ```
+
+---
+
+## セッション 9
+
+### ボタンレイアウト再編成
+
+**変更内容**:
+- ボタン行1（上段）: `[▶ Play] [■ Stop & Capture] [✦ 全面散布]`
+- ボタン行2（下段）: 左サブDiv `[🎬 Filter Library] [■ BG+Filter] [Blend Mode ▾]` + 右サブDiv `[背景色トグル] [bgColorInput]`
+
+背景色ON/OFFボタンとカラーピッカーを、以前の上段右端から**下段右端**に移動した。
+
+---
+
+### 全面散布モード（Scatter Mode）
+
+**目的**: 既存のエミッター発生点とは独立して、キャンバス全体にランダムにパーティクルを発生させるモードを追加する。
+
+**実装**:
+- `scatterMode` 状態変数（`node.properties.scatterMode` で永続化）
+- 上段ボタン右端に `✦ 全面散布` トグルボタンを追加
+  - ON 時: 背景色 `#8a4a8a`
+  - OFF 時: 背景色 `#333344`
+- `ParticleSystem` コンストラクタに `scatterMode = false` パラメーターを追加
+- `_resetParticle` 内で scatterMode フラグを参照し、発生座標をオーバーライド:
+  ```js
+  const ox = this.scatterMode ? (Math.random() - 0.5) * this.renderer.width  : this.origin.x;
+  const oy = this.scatterMode ? (Math.random() - 0.5) * this.renderer.height : this.origin.y;
+  ```
+  scene 座標系は中心原点・Y軸上向き（`scale.y=-1`）なので `(Math.random()-0.5)*W/H` でキャンバス全面をカバーできる
+
+**対象システム**: `SmokeSystem`、`SparkSystem`、`RaySystem`（`StarWarpSystem` は独自の3D座標系を持つため対象外）
+
+**設定の永続化**: `onConfigure` でワークフロー復元時に `scatterMode` を復元。`openFilterLibrary` 呼び出し時にも `scatterMode` を渡す。
+
+---
+
+### 背景画像の初回再生時スタレ問題の修正
+
+**症状**: 背景画像を変更した後、1度目の ▶ Play → ■ Stop & Capture サイクルでは前の画像が表示される。
+
+**根本原因**: `input_images[node_id]` は Python 側で `render()` が実行されたタイミングでのみ更新される。背景画像を変更しても Python `render()` が走らなければ古い画像がキャッシュされたまま。
+
+**修正**: 再生ボタン押下時、背景画像が必要なケース（`image` 入力接続済み、かつ `filterOnBg=true` または `particle_type=none`）では `queuePrompt(0)` を先行実行し、`onExecuted` の発火を待ってから背景をロードする。
+
+```js
+if (_hasImageLink && (filterOnBg || _type === "none")) {
+  await new Promise(resolve => {
+    const timer = setTimeout(resolve, 8000); // タイムアウト8秒
+    const prev = node.onExecuted;
+    node.onExecuted = async function(data) {
+      clearTimeout(timer);
+      node.onExecuted = prev;
+      await prev?.apply(this, arguments);
+      resolve();
+    };
+    app.queuePrompt(0);
+  });
+}
+```
+
+**`onExecuted` のトリガー条件更新**: `filterOnBg` フラグの有無に加え、`particle_type === "none"` の場合も `loadBackgroundSprite()` と `applyFilter()` を実行するよう変更。
+
+---
+
+### フィルタライブラリ: モーション設定の独立パネル化
+
+**目的**: フィルタライブラリの「Particle」パネルに混在していたモーション設定（乱気流・風・渦）を独立した左パネル項目として分離する。
+
+**変更後の左パネル構成**:
+1. None / Glow / Bloom / … （フィルター一覧）
+2. --- （セパレーター）
+3. Particle（パーティクル設定: テクスチャ・シェイプ）
+4. Parameters（既存: 速度・寿命・サイズ・広がり等）
+5. **Motion**（新規: 乱気流・風・渦）← 新設
+
+**`filter_library.js` 変更**:
+- `buildParticleParamPanel()` からモーション設定セクション（turbulence / turbFreq / windX / windY / swirl）を完全に除去
+- 新関数 `buildMotionPanel()` を追加 — 同スライダー群を `t("motionSettings")` ヘッダー付きで描画
+- 新関数 `selectParticleMotion()` を追加 — `currentKey = "particle_motion"` をセットして `buildMotionPanel()` を呼ぶ
+- `highlightList()` に `"particle_motion"` キーの処理を追加（ハイライトカラー: `#da8a4a` / `#ffccaa`）
+- i18n: `particleMotionDesc`（新規）を3言語に追加
+
+---
+
+### フィルタライブラリ: アルファベット・数字シェイプ
+
+**目的**: プリセットシェイプ（円、星形など）に加えて、英字・数字をパーティクルの形状として使用できるようにする。
+
+**UI（フィルタライブラリ「Particle」パネル下部）**:
+- テキストボックス（プレースホルダー: `"A,B,C,1,2,3"`）— カンマ区切りで英数字を入力（大文字・小文字可）
+- **[A-Z]** ボタン — アルファベット大文字 A〜Z を自動入力
+- **[0-9]** ボタン — 数字 0〜9 を自動入力
+- **[Clear]** ボタン — テキストボックスをクリア
+
+**`filter_library.js` 変更**:
+- `origParticle` に `charSet: particleSettings?.charSet ?? []` を追加
+- `updateCharSet()` 関数: カンマ分割→トリム→英数字フィルタ（`/^[A-Za-z0-9]$/`）→ Set による重複除去（大文字小文字を保持、`toUpperCase` なし）
+  ```js
+  function updateCharSet() {
+    const chars = charInput.value
+      .split(",").map(s => s.trim()).filter(s => /^[A-Za-z0-9]$/.test(s));
+    tempParticle.charSet = [...new Set(chars)];
+    notifyParticle();
+  }
+  ```
+
+**`particle_widget.js` 変更**:
+- `particleCharSet` 状態変数（`node.properties.particleCharSet` で永続化）
+- `createParticleSystem` に `charSet=[]` パラメーターを追加し、コンストラクタの `ex` 配列経由で各システムに渡す
+- `ParticleSystem` コンストラクタ: `charSet` を最後のパラメーターとして追加
+  ```js
+  constructor(..., scatterMode = false, charSet = []) {
+    this.charSet = (charSet && charSet.length > 0) ? charSet : null;
+  }
+  ```
+- `_pickTex(i)`: 優先チェーン `customTextures > charSet > randomShape > shapePreset`
+  ```js
+  if (this.charSet) {
+    const ch = this.charSet[Math.floor(Math.random() * this.charSet.length)];
+    return getShapeTexture(this.PIXI, `char_${ch}`);
+  }
+  ```
+- `_drawShape()` の `default` ケース: `"char_X"` 形式のシェイプキーに対応
+  ```js
+  default: {
+    if (shapeType && shapeType.startsWith("char_")) {
+      const ch = shapeType.slice(5);
+      ctx.font = "bold 52px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(ch, 32, 34);
+    }
+    break;
+  }
+  ```
+  64×64 Canvas を使用し、Y方向 +2px オフセット（34px）でフォントの視覚的中心をキャンバス中央に合わせる。
+
+**大文字・小文字の保持**: テキストボックスで入力した文字はそのままの大小でパーティクルが出現する。`_shapeTexCache` のキーは `"char_A"` / `"char_a"` のように区別され、別々のテクスチャとしてキャッシュされる。
+
+---
+
+### i18n 追加キー
+
+| キー | 用途 |
+|-----|------|
+| `scatterModeOn` | 全面散布ボタンのラベル（ON時） |
+| `scatterModeOff` | 全面散布ボタンのラベル（OFF時） |
+| `scatterModeTitle` | 全面散布ボタンのツールチップ |
+| `particleMotionDesc` | モーション設定パネルの説明文 |
+| `charShapeLabel` | 文字シェイプのラベル |
+| `charShapePlaceholder` | テキストボックスのプレースホルダー |
+| `charShapeDesc` | 文字シェイプの説明文 |
+| `charShapeClear` | クリアボタンのラベル |
+
+---
+
+### リポジトリ構造のフラット化
+
+**変更内容**: `comfyUI-particle/` サブフォルダを廃止し、全ファイルをリポジトリルートに移動。
+
+**変更前**:
+```
+comfyUI-particle-pixijs/
+└── comfyUI-particle/
+    ├── __init__.py
+    ├── particle_node.py
+    ├── DEVLOG.md
+    └── web/
+```
+
+**変更後**:
+```
+comfyUI-particle-pixijs/
+├── __init__.py
+├── particle_node.py
+├── DEVLOG.md
+├── README.md
+└── web/
+```
+
+**理由**: `ComfyUI/custom_nodes/` 直下に `git clone` した場合、ComfyUI はリポジトリルートの `__init__.py` を探す。サブフォルダに格納されていると認識されないため、ルートに配置する必要があった。
