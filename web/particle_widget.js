@@ -8,6 +8,8 @@ async function loadPixiJS() {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js";
+    script.integrity = "sha512-4ZfEVGDoKT//8YicIXrm8r/GyfPWIDyPT06i3FfPqjRc0vKZld/q6dBQQqO1Uogst58ytaBTI7lY2eU1+jniKg==";
+    script.crossOrigin = "anonymous";
     script.onload = () => resolve(window.PIXI);
     script.onerror = reject;
     document.head.appendChild(script);
@@ -33,9 +35,8 @@ async function loadPixiFilters() {
   if (window.PIXI?.filters?.GlowFilter) return;
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    // バージョンを固定して意図しないメジャー更新を防ぐ。
-    // SRI ハッシュは `openssl dgst -sha512 -binary pixi-filters.min.js | openssl base64 -A` で生成し integrity 属性に追加すること。
     script.src = "https://cdn.jsdelivr.net/npm/pixi-filters@5.3.0/dist/browser/pixi-filters.min.js";
+    script.integrity = "sha512-W4K7mPgbWSlASV5YU7vdblebNXYy2qWPEHKojeUvEqveGusO4XxW34iG+Rqh3pUAw1UeD9+wZkgEAweKc5LD+g==";
     script.crossOrigin = "anonymous";
     script.onload = () => resolve();
     script.onerror = reject;
@@ -732,7 +733,7 @@ app.registerExtension({
       async function loadCustomTextures() {
         for (const item of customParticleTextures) {
           if (item.tex && !item.tex.destroyed) continue;
-          if (!item.url || (!item.url.startsWith("data:image/") && !item.url.startsWith("/"))) {
+          if (!item.url || !item.url.startsWith("data:image/")) {
             item.tex = null;
             continue;
           }
@@ -1490,7 +1491,7 @@ app.registerExtension({
               await Promise.all(snap.textures.map(async item => {
                 const found = customParticleTextures.find(ct => ct.url === item.url);
                 if (found?.tex && !found.tex.destroyed) { item.tex = found.tex; return; }
-                if (item.url?.startsWith("data:image/") || item.url?.startsWith("/")) {
+                if (item.url?.startsWith("data:image/")) {
                   try { item.tex = await PIXI.Texture.fromURL(item.url); } catch(_) {}
                 }
               }));
