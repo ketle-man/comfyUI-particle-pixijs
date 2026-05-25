@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-particle-pixijs"
+description = "A ComfyUI custom node that renders PixiJS particle effects (smoke, spark, ray, star warp) onto a canvas and outputs the result as an image."
+version = "1.3.2"
+license = "MIT"
+requires-python = ">= 3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/ketle-man/comfyUI-particle-pixijs"
+
+[tool.comfy]
+PublisherId = "statsu"
+DisplayName = "Particle Renderer (PixiJS)"
+Icon = "https://raw.githubusercontent.com/ketle-man/comfyUI-particle-pixijs/master/docs/images/thumb.png"
