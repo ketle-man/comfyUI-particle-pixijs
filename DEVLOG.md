@@ -1016,3 +1016,95 @@ node.onConnectionsChange = function(type, slotIndex, isConnected) {
 **`i18n.js` 変更**:
 - `charShapeSymbols: "[!?#:]"` を en/ja/zh に追加
 - `charShapePlaceholder` を `"例: A,B,C,1,2,3,!,★"` に更新（記号対応を示す）
+
+---
+
+## セッション 10
+
+### バグ修正: ブレンドモード変更後に再生すると半透明になる問題
+
+**症状**: ブレンドモードを変更して ▶ Play を押すと、停止状態では不透明だったパーティクルが再生中に半透明になる。
+
+**根本原因**: `_spawnAll`（初期化時）は `alpha = 1.0`（デフォルト引数）でスプライトを設定する。一方、各システムの `update` は毎フレームハードコードされた別のalpha値で `_setColorAndAlpha` を呼び出していた。
+
+| システム | `_spawnAll` 時のalpha | `update` 時のalpha |
+|---|---|---|
+| SmokeSystem | 1.0 | 0.35 |
+| SparkSystem | 1.0 | 0.9 |
+| RaySystem   | 1.0 | 0.8 × (1 - t) |
+
+この不一致により「停止状態=不透明、再生中=半透明」という見た目の変化が生じていた。ブレンドモードの設定値に関わらず再現する。
+
+**修正**:
+
+1. `ParticleSystem` 基底クラスに `_getAlpha(t)` メソッドを追加（デフォルト `1.0`）
+2. `SmokeSystem`・`SparkSystem`・`RaySystem` それぞれで `_getAlpha` をオーバーライド
+3. `_spawnAll` でのalpha設定を `this._getAlpha(t0)` に変更
+4. 各 `update` 内のハードコード値も `this._getAlpha(t)` に置き換え
+
+```js
+// ParticleSystem 基底クラス
+_getAlpha(t) { return 1.0; }
+
+// _spawnAll 内
+const t0 = this.ages[i] / (this.lifetimes[i] || 1);
+this._setColorAndAlpha(i, t0, this._getAlpha(t0));
+
+// SmokeSystem
+_getAlpha(_t) { return 0.35; }
+
+// SparkSystem
+_getAlpha(_t) { return 0.9; }
+
+// RaySystem
+_getAlpha(t) { return 0.8 * (1 - t); }
+```
+
+これにより停止状態・再生状態でalphaが一致し、ブレンドモードの効果が再生前後で同じ見た目になる。
+
+---
+
+### バグ修正: BG+フィルタ ON/OFF が効かなくなる問題
+
+**症状**: BG+フィルタ のON/OFFを切り替えると、稀に操作が無効になり、ブラウザのハードリセットが必要になる。
+
+**根本原因**: 競合状態（Race Condition）。`loadBackgroundSprite()` は非同期関数（fetch → `PIXI.Texture.fromURL`）のため、複数のトリガー（ボタン連打、playBtn + onExecuted の同時発火など）により並行して呼び出されると、以下の問題が発生していた。
+
+1. 呼び出しA: bgSpriteをdestroyして後続処理を待機中
+2. 呼び出しB: bgSpriteがnullのためdestroyをスキップして後続処理を待機中
+3. Aが先に完了 → `filterWrapper.addChildAt(bgSprite①, 0)`
+4. Bが完了 → `filterWrapper.addChildAt(bgSprite②, 0)`
+5. **filterWrapper内にbgSpriteが2つ存在する状態になる**
+
+次回 `loadBackgroundSprite()` が呼ばれると `bgSprite`（②）のみを`destroy()`するが、①がfilterWrapper内に残り続ける。ON/OFFを繰り返すたびに累積し、最終的には背景の制御が完全に失われる。
+
+**修正**:
+
+1. `_bgLoadToken` カウンター変数を追加
+2. `loadBackgroundSprite()` 呼び出し時に filterWrapper の子を走査し、`scene` と `bgColorRect` 以外（＝余分なbgSprite）を全て除去
+3. fetch・テクスチャロード完了後にトークンを照合し、新しい呼び出しに上書きされた場合は結果を破棄
+
+```js
+let _bgLoadToken = 0;
+
+async function loadBackgroundSprite() {
+  // filterWrapper 内の余分な bgSprite を全て除去
+  if (filterWrapper) {
+    const stale = filterWrapper.children.filter(c => c !== scene && c !== bgColorRect);
+    for (const s of stale) { filterWrapper.removeChild(s); s.destroy(); }
+  }
+  bgSprite = null;
+
+  const token = ++_bgLoadToken;
+  ...
+  await fetch(...);
+  if (token !== _bgLoadToken) return; // 新しいロードが開始されていたら破棄
+  ...
+  await PIXI.Texture.fromURL(data.image);
+  if (token !== _bgLoadToken) return; // テクスチャロード中に上書きされた場合も破棄
+  ...
+  filterWrapper.addChildAt(bgSprite, 0);
+}
+```
+
+これにより複数の並行呼び出しが発生しても、最新の呼び出しの結果のみが反映される。

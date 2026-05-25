@@ -220,6 +220,7 @@ class ParticleSystem {
     // base texture is 64x64
     return targetPixelSize / 64.0;
   }
+  _getAlpha(t) { return 1.0; }
   _setColorAndAlpha(i, t, alphaValue = 1.0) {
     const c = this.gradientFn(t);
     const sprite = this.particles[i];
@@ -254,7 +255,8 @@ class ParticleSystem {
       this.particles.push(sprite);
       this._resetParticle(i);
       this.ages[i] = Math.random() * (this.lifetimes[i] || 1);
-      this._setColorAndAlpha(i, this.ages[i] / (this.lifetimes[i] || 1));
+      const t0 = this.ages[i] / (this.lifetimes[i] || 1);
+      this._setColorAndAlpha(i, t0, this._getAlpha(t0));
     }
   }
   _applyMotion(sprite, i, delta) {
@@ -282,6 +284,7 @@ class ParticleSystem {
 
 // ---- 煙 ----
 class SmokeSystem extends ParticleSystem {
+  _getAlpha(_t) { return 0.35; }
   init() {
     for (let i=0;i<this.count;i++){this.velocities.push({x:0,y:0});this.lifetimes.push(0);this.ages.push(0);}
     this._spawnAll(this.PIXI.BLEND_MODES.NORMAL);
@@ -292,7 +295,7 @@ class SmokeSystem extends ParticleSystem {
     const oy = this.scatterMode ? (Math.random() - 0.5) * this.renderer.height : this.origin.y;
     const dir=this.direction;
     sprite.position.set(ox+(Math.random()-.5)*40, oy+(Math.random()-.5)*12);
-    
+
     const spd=(30+Math.random()*20)*this.strength, a=dir+(Math.random()-.5)*.5*(this.spread??1);
     this.velocities[i]={x:Math.cos(a)*spd*.3+(Math.random()-.5)*8, y:Math.sin(a)*spd};
     this.lifetimes[i]=3.0+Math.random()*2.0; this.ages[i]=0;
@@ -308,13 +311,14 @@ class SmokeSystem extends ParticleSystem {
       sprite.position.x += Math.sin(this.ages[i]*2.5+i)*2*delta;
       this._applyMotion(sprite, i, delta);
       sprite.scale.set(this._getScale(this.particleSize*(18+t*12)) * (this.scales[i] ?? 1));
-      this._setColorAndAlpha(i, t, 0.35);
+      this._setColorAndAlpha(i, t, this._getAlpha(t));
     }
   }
 }
 
 // ---- 火花 ----
 class SparkSystem extends ParticleSystem {
+  _getAlpha(_t) { return 0.9; }
   init() {
     for (let i=0;i<this.count;i++){this.velocities.push({x:0,y:0});this.lifetimes.push(0);this.ages.push(0);}
     this._spawnAll(this.PIXI.BLEND_MODES.ADD);
@@ -336,18 +340,20 @@ class SparkSystem extends ParticleSystem {
     for (let i=0;i<this.count;i++) {
       this.ages[i]+=delta;
       if (this.ages[i]>this.lifetimes[i]){this._resetParticle(i);this._setColorAndAlpha(i,0);continue;}
+      const t=this.ages[i]/this.lifetimes[i];
       const sprite = this.particles[i];
       sprite.position.x += this.velocities[i].x*delta;
       sprite.position.y += this.velocities[i].y*delta;
       this.velocities[i].y += g*delta;
       this._applyMotion(sprite, i, delta);
-      this._setColorAndAlpha(i, this.ages[i]/this.lifetimes[i], 0.9);
+      this._setColorAndAlpha(i, t, this._getAlpha(t));
     }
   }
 }
 
 // ---- 光線 ----
 class RaySystem extends ParticleSystem {
+  _getAlpha(t) { return 0.8 * (1 - t); }
   init() {
     for (let i=0;i<this.count;i++){this.velocities.push({x:0,y:0});this.lifetimes.push(0);this.ages.push(0);}
     this._spawnAll(this.PIXI.BLEND_MODES.ADD);
@@ -368,12 +374,12 @@ class RaySystem extends ParticleSystem {
     for (let i=0;i<this.count;i++) {
       this.ages[i]+=delta;
       if (this.ages[i]>this.lifetimes[i]){this._resetParticle(i);this._setColorAndAlpha(i,0);continue;}
-      const t=this.ages[i]/this.lifetimes[i], fade=1-t;
+      const t=this.ages[i]/this.lifetimes[i];
       const sprite = this.particles[i];
-      sprite.position.x += this.velocities[i].x*delta*fade;
-      sprite.position.y += this.velocities[i].y*delta*fade;
+      sprite.position.x += this.velocities[i].x*delta*(1-t);
+      sprite.position.y += this.velocities[i].y*delta*(1-t);
       this._applyMotion(sprite, i, delta);
-      this._setColorAndAlpha(i, t, 0.8 * fade);
+      this._setColorAndAlpha(i, t, this._getAlpha(t));
     }
   }
 }
@@ -717,6 +723,7 @@ app.registerExtension({
 
       // ---- バックグラウンド入力画像スプライト (particle_type="none" 時) ----
       let bgSprite = null;
+      let _bgLoadToken = 0; // 競合防止: 最新のloadBackgroundSprite呼び出しを識別
 
       // ---- 背景画像フィルター適用フラグ ----
       let filterOnBg = node.properties?.filterOnBg ?? false;
@@ -788,8 +795,15 @@ app.registerExtension({
       }
 
       async function loadBackgroundSprite() {
-        if (bgSprite && filterWrapper) { filterWrapper.removeChild(bgSprite); bgSprite.destroy(); bgSprite = null; }
-        else { bgSprite = null; }
+        // 既存の bgSprite を全て除去（二重追加を防ぐために filterWrapper の子も走査）
+        if (filterWrapper) {
+          const stale = filterWrapper.children.filter(c => c !== scene && c !== bgColorRect);
+          for (const s of stale) { filterWrapper.removeChild(s); s.destroy(); }
+        }
+        bgSprite = null;
+
+        const token = ++_bgLoadToken; // このロード固有のトークン
+
         const type = node.widgets?.find(w => w.name === "particle_type")?.value ?? "smoke";
         // "none" タイプ、または「BG+フィルタ」が ON のときに背景画像を読み込む
         if (type !== "none" && !filterOnBg) return;
@@ -802,11 +816,13 @@ app.registerExtension({
           const res = await fetch(`/particle/input/${nodeId}`);
           data = await res.json();
         } catch (_) { return; }
+        if (token !== _bgLoadToken) return; // より新しいロードが始まっていたら破棄
         if (!data.image) return;
         if (!filterWrapper) return;
         let tex;
         try { tex = await PIXI.Texture.fromURL(data.image); } catch(_) { return; }
-        if (!filterWrapper) return; // 非同期待機中に破棄された場合
+        if (token !== _bgLoadToken) return; // テクスチャロード中に上書きされた場合
+        if (!filterWrapper) return;
         bgSprite = new PIXI.Sprite(tex);
         bgSprite.width  = currentW;
         bgSprite.height = currentH;
