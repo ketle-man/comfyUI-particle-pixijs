@@ -87,6 +87,106 @@ export const FILTER_CATALOG = {
                   { key:"centerY",     labelKey:"paramCenterY",     min:0, max:1,   step:0.01, def:0.5 },
                   { key:"innerRadius", labelKey:"paramInnerRadius", min:0, max:200,  step:5,   def:0   },
                 ]},
+  adjustment: { labelKey: "filterAdjustmentLabel", section: "color", descKey: "filterAdjustmentDesc",
+                params: [
+                  { key:"gamma",      labelKey:"paramGamma",      min:0.1, max:3, step:0.05, def:1 },
+                  { key:"saturation", labelKey:"paramSaturation", min:0,   max:3, step:0.05, def:1 },
+                  { key:"contrast",   labelKey:"paramContrast",   min:0,   max:3, step:0.05, def:1 },
+                  { key:"brightness", labelKey:"paramBrightness", min:0,   max:3, step:0.05, def:1 },
+                ]},
+  hsl:        { labelKey: "filterHslLabel",        section: "color", descKey: "filterHslDesc",
+                params: [
+                  { key:"hue",        labelKey:"paramHue",        min:-180, max:180, step:1,    def:0 },
+                  { key:"saturation", labelKey:"paramSaturation", min:-1,   max:1,   step:0.05, def:0 },
+                  { key:"lightness",  labelKey:"paramLightness",  min:-1,   max:1,   step:0.05, def:0 },
+                ]},
+  colorOverlay: { labelKey: "filterColorOverlayLabel", section: "color", descKey: "filterColorOverlayDesc",
+                params: [
+                  { key:"color", labelKey:"paramOverlayColor", type:"color",          def:"#ff0000" },
+                  { key:"alpha", labelKey:"paramAlpha",        min:0, max:1, step:0.05, def:0.5     },
+                ]},
+  grayscale:  { labelKey: "filterGrayscaleLabel",  section: "color", descKey: "filterGrayscaleDesc",
+                params: [] },
+  advancedBloom: { labelKey: "filterAdvancedBloomLabel", section: "effects", descKey: "filterAdvancedBloomDesc",
+                params: [
+                  { key:"threshold",  labelKey:"paramThreshold",  min:0, max:1,  step:0.05, def:0.5 },
+                  { key:"bloomScale", labelKey:"paramBloomScale", min:0, max:3,  step:0.05, def:1   },
+                  { key:"brightness", labelKey:"paramBrightness", min:0, max:3,  step:0.05, def:1   },
+                  { key:"blur",       labelKey:"paramBlur",       min:0, max:20, step:0.5,  def:8   },
+                ]},
+  ascii:      { labelKey: "filterAsciiLabel",      section: "effects", descKey: "filterAsciiDesc",
+                params: [
+                  { key:"size", labelKey:"paramAsciiSize", min:2, max:20, step:1, def:8 },
+                ]},
+  bevel:      { labelKey: "filterBevelLabel",      section: "effects", descKey: "filterBevelDesc",
+                params: [
+                  { key:"rotation",    labelKey:"paramAngle",       min:0, max:360, step:1,    def:45  },
+                  { key:"thickness",   labelKey:"paramThickness",   min:0, max:10,  step:0.5,  def:2   },
+                  { key:"lightColor",  labelKey:"paramLightColor",  type:"color",              def:"#ffffff" },
+                  { key:"lightAlpha",  labelKey:"paramLightAlpha",  min:0, max:1,   step:0.05, def:0.7 },
+                  { key:"shadowColor", labelKey:"paramShadowColor", type:"color",              def:"#000000" },
+                  { key:"shadowAlpha", labelKey:"paramShadowAlpha", min:0, max:1,   step:0.05, def:0.7 },
+                ]},
+  bulgePinch: { labelKey: "filterBulgePinchLabel", section: "effects", descKey: "filterBulgePinchDesc",
+                params: [
+                  { key:"centerX",  labelKey:"paramCenterX",  min:0,  max:1,   step:0.01, def:0.5 },
+                  { key:"centerY",  labelKey:"paramCenterY",  min:0,  max:1,   step:0.01, def:0.5 },
+                  { key:"radius",   labelKey:"paramRadius",   min:10, max:500, step:5,    def:150 },
+                  { key:"strength", labelKey:"paramStrength", min:-1, max:1,   step:0.05, def:0.5 },
+                ]},
+  crossHatch: { labelKey: "filterCrossHatchLabel", section: "effects", descKey: "filterCrossHatchDesc",
+                params: [] },
+  emboss:     { labelKey: "filterEmbossLabel",     section: "effects", descKey: "filterEmbossDesc",
+                params: [
+                  { key:"strength", labelKey:"paramStrength", min:0, max:20, step:0.5, def:5 },
+                ]},
+  glitch:     { labelKey: "filterGlitchLabel",     section: "effects", descKey: "filterGlitchDesc",
+                params: [
+                  { key:"slices",    labelKey:"paramSlices",    min:2,    max:20,  step:1, def:5   },
+                  { key:"offset",    labelKey:"paramOffset",    min:-200, max:200, step:1, def:100 },
+                  { key:"direction", labelKey:"paramDirection", min:0,    max:360, step:5, def:0   },
+                ]},
+  godray:     { labelKey: "filterGodrayLabel",     section: "effects", descKey: "filterGodrayDesc",
+                params: [
+                  { key:"angle",      labelKey:"paramAngle",      min:-60, max:60, step:1,    def:30  },
+                  { key:"gain",       labelKey:"paramGain",       min:0,   max:1,  step:0.05, def:0.5 },
+                  { key:"lacunarity", labelKey:"paramLacunarity", min:0,   max:5,  step:0.1,  def:2.5 },
+                  { key:"time",       labelKey:"paramTime",       min:0,   max:10, step:0.1,  def:0   },
+                ]},
+  radialBlur: { labelKey: "filterRadialBlurLabel", section: "effects", descKey: "filterRadialBlurDesc",
+                params: [
+                  { key:"angle",      labelKey:"paramAngle",      min:-180, max:180, step:1,    def:20  },
+                  { key:"centerX",    labelKey:"paramCenterX",    min:0,    max:1,   step:0.01, def:0.5 },
+                  { key:"centerY",    labelKey:"paramCenterY",    min:0,    max:1,   step:0.01, def:0.5 },
+                  { key:"kernelSize", labelKey:"paramKernelSize", min:3,    max:25,  step:2,    def:5   },
+                ]},
+  reflection: { labelKey: "filterReflectionLabel", section: "effects", descKey: "filterReflectionDesc",
+                params: [
+                  { key:"boundary",   labelKey:"paramBoundary",   min:0,  max:1,   step:0.01, def:0.5 },
+                  { key:"amplitude",  labelKey:"paramAmplitude",  min:0,  max:50,  step:1,    def:20  },
+                  { key:"waveLength", labelKey:"paramWaveLength", min:10, max:200, step:1,    def:100 },
+                  { key:"time",       labelKey:"paramTime",       min:0,  max:10,  step:0.1,  def:0   },
+                ]},
+  shockwave:  { labelKey: "filterShockwaveLabel",  section: "effects", descKey: "filterShockwaveDesc",
+                params: [
+                  { key:"centerX",    labelKey:"paramCenterX",    min:0,  max:1,   step:0.01, def:0.5 },
+                  { key:"centerY",    labelKey:"paramCenterY",    min:0,  max:1,   step:0.01, def:0.5 },
+                  { key:"amplitude",  labelKey:"paramAmplitude",  min:0,  max:100, step:1,    def:30  },
+                  { key:"wavelength", labelKey:"paramWaveLength", min:10, max:400, step:5,    def:160 },
+                  { key:"time",       labelKey:"paramTime",       min:0,  max:5,   step:0.05, def:0.5 },
+                ]},
+  tiltShift:  { labelKey: "filterTiltShiftLabel",  section: "effects", descKey: "filterTiltShiftDesc",
+                params: [
+                  { key:"blur",         labelKey:"paramBlur",         min:0, max:200,  step:5,  def:100 },
+                  { key:"gradientBlur", labelKey:"paramGradientBlur", min:0, max:1500, step:10, def:600 },
+                ]},
+  twist:      { labelKey: "filterTwistLabel",      section: "effects", descKey: "filterTwistDesc",
+                params: [
+                  { key:"angle",   labelKey:"paramStrength", min:-10, max:10,  step:0.5,  def:4   },
+                  { key:"radius",  labelKey:"paramRadius",   min:10,  max:500, step:5,    def:200 },
+                  { key:"centerX", labelKey:"paramCenterX",  min:0,   max:1,   step:0.01, def:0.5 },
+                  { key:"centerY", labelKey:"paramCenterY",  min:0,   max:1,   step:0.01, def:0.5 },
+                ]},
 };
 
 // ---- エクスポート: ライブラリを開く ----
@@ -120,6 +220,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     randomShape:    particleSettings?.randomShape    ?? false,
     motionParams:   { ..._defMotion, ...(particleSettings?.motionParams ?? {}) },
     globalStrength: particleSettings?.globalStrength ?? 1.0,
+    starStretch:    particleSettings?.starStretch    ?? 2.0,
     charSet:        particleSettings?.charSet ?? [],
   };
   let tempParticle = JSON.parse(JSON.stringify(origParticle));
@@ -160,15 +261,66 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   // ---- Body (3カラム) ----
   const body = el("div", { style: "display:flex;flex:1;overflow:hidden;" });
 
-  // ── 左パネル: リスト ──
+  // ── 左パネル: タブ + リスト ──
   const leftPanel = el("div", {
-    style: "width:160px;flex-shrink:0;overflow-y:auto;border-right:1px solid #2a2a4a;" +
-           "background:#1a1a28;padding:6px 0;",
+    style: "width:170px;flex-shrink:0;display:flex;flex-direction:column;" +
+           "border-right:1px solid #2a2a4a;background:#1a1a28;",
   });
 
+  // ---- タブバー（フィルター / パーティクル） ----
+  let activeTab       = "filter";
+  let lastFilterKey   = tempSettings.type || "none";
+  let lastParticleKey = "particle_settings";
+
+  const tabBar = el("div", {
+    style: "display:flex;flex-shrink:0;border-bottom:1px solid #2a2a4a;background:#16213e;",
+  });
+  const tabBtns = {};
+  for (const [id, labelKey] of [["filter", "tabFilter"], ["particle", "tabParticle"]]) {
+    const btn = el("div", {
+      style: "flex:1;text-align:center;padding:8px 2px;cursor:pointer;font-size:11px;" +
+             "user-select:none;border-bottom:2px solid transparent;transition:background 0.1s;",
+    }, t(labelKey));
+    btn.addEventListener("click", () => setTab(id));
+    tabBtns[id] = btn;
+    tabBar.appendChild(btn);
+  }
+  leftPanel.appendChild(tabBar);
+
+  const listScroll = el("div", { style: "flex:1;overflow-y:auto;padding:6px 0;" });
+  leftPanel.appendChild(listScroll);
+
+  const filterListEl   = el("div");
+  const particleListEl = el("div", { style: "display:none;" });
+  listScroll.append(filterListEl, particleListEl);
+
+  function setTab(id) {
+    activeTab = id;
+    for (const [k, btn] of Object.entries(tabBtns)) {
+      const sel = k === id;
+      btn.style.background        = sel ? "#252545" : "";
+      btn.style.borderBottomColor = sel ? (k === "filter" ? "#4a8adb" : "#da8a4a") : "transparent";
+      btn.style.color             = sel ? (k === "filter" ? "#aaccff" : "#ffccaa") : "#888";
+      btn.style.fontWeight        = sel ? "bold" : "normal";
+    }
+    filterListEl.style.display   = id === "filter"   ? "" : "none";
+    particleListEl.style.display = id === "particle" ? "" : "none";
+    if (id === "filter") {
+      selectFilter(lastFilterKey);
+    } else if (lastParticleKey === "particle_params") {
+      selectParticleParams();
+    } else if (lastParticleKey === "particle_motion") {
+      selectParticleMotion();
+    } else {
+      selectParticle();
+    }
+  }
+
+  // ---- フィルタータブ: フィルター一覧 ----
   const filterItems = {};
-  for (const [secId, secKey] of [["basic", "sectionBasic"], ["extra", "sectionExtra"]]) {
-    leftPanel.appendChild(el("div", {
+  for (const [secId, secKey] of [["basic", "sectionBasic"], ["extra", "sectionExtra"],
+                                 ["color", "sectionColor"], ["effects", "sectionEffects"]]) {
+    filterListEl.appendChild(el("div", {
       style: "font-size:10px;color:#556;padding:8px 10px 3px;letter-spacing:0.06em;font-weight:bold;",
     }, t(secKey)));
     for (const [key, def] of Object.entries(FILTER_CATALOG)) {
@@ -181,14 +333,11 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
       item.addEventListener("mouseleave", () => { if (currentKey !== key) item.style.background = ""; });
       item.addEventListener("click", () => selectFilter(key));
       filterItems[key] = item;
-      leftPanel.appendChild(item);
+      filterListEl.appendChild(item);
     }
   }
 
-  // ---- パーティクル設定項目 ----
-  leftPanel.appendChild(el("div", {
-    style: "font-size:10px;color:#556;padding:8px 10px 3px;letter-spacing:0.06em;font-weight:bold;",
-  }, t("sectionParticle")));
+  // ---- パーティクルタブ: 設定項目 ----
   const particleItem = el("div", {
     style: "padding:7px 12px;cursor:pointer;font-size:12px;transition:background 0.1s;" +
            "border-left:3px solid transparent;user-select:none;",
@@ -200,7 +349,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     if (currentKey !== "particle_settings") particleItem.style.background = "";
   });
   particleItem.addEventListener("click", () => selectParticle());
-  leftPanel.appendChild(particleItem);
+  particleListEl.appendChild(particleItem);
 
   const particleParamsItem = el("div", {
     style: "padding:7px 12px;cursor:pointer;font-size:12px;transition:background 0.1s;" +
@@ -213,7 +362,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     if (currentKey !== "particle_params") particleParamsItem.style.background = "";
   });
   particleParamsItem.addEventListener("click", () => selectParticleParams());
-  leftPanel.appendChild(particleParamsItem);
+  particleListEl.appendChild(particleParamsItem);
 
   const particleMotionItem = el("div", {
     style: "padding:7px 12px;cursor:pointer;font-size:12px;transition:background 0.1s;" +
@@ -226,7 +375,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     if (currentKey !== "particle_motion") particleMotionItem.style.background = "";
   });
   particleMotionItem.addEventListener("click", () => selectParticleMotion());
-  leftPanel.appendChild(particleMotionItem);
+  particleListEl.appendChild(particleMotionItem);
 
   function highlightList(activeKey) {
     for (const [k, item] of Object.entries(filterItems)) {
@@ -708,6 +857,11 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
       rightPanel.appendChild(wrap);
     }
 
+    // ---- 光条の伸び（star_warp 専用） ----
+    mkSlider("starStretch", 0, 6, 0.1,
+      () => tempParticle.starStretch,
+      v  => { tempParticle.starStretch = v; notifyParticle(); });
+
     // ---- 固定回転角度 ----
     const rotWrap = el("div", { style: "margin-bottom:12px;" });
     rotWrap.appendChild(
@@ -868,7 +1022,8 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   function selectFilter(key) {
     const def = FILTER_CATALOG[key];
     if (!def) return;
-    currentKey = key;
+    currentKey    = key;
+    lastFilterKey = key;
     const newParams = {};
     for (const p of def.params) {
       newParams[p.key] = (key === origSettings.type && origSettings.params[p.key] !== undefined)
@@ -884,19 +1039,22 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   }
 
   function selectParticle() {
-    currentKey = "particle_settings";
+    currentKey      = "particle_settings";
+    lastParticleKey = "particle_settings";
     highlightList("particle_settings");
     buildParticleParamPanel();
   }
 
   function selectParticleParams() {
-    currentKey = "particle_params";
+    currentKey      = "particle_params";
+    lastParticleKey = "particle_params";
     highlightList("particle_params");
     buildParticleParamsPanel();
   }
 
   function selectParticleMotion() {
-    currentKey = "particle_motion";
+    currentKey      = "particle_motion";
+    lastParticleKey = "particle_motion";
     highlightList("particle_motion");
     buildMotionPanel();
   }
@@ -912,7 +1070,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   }
 
   // ---- 初期化 ----
-  selectFilter(tempSettings.type || "none");
+  setTab("filter");
   startPreviewLoop();
   requestAnimationFrame(() => overlay.focus());
 

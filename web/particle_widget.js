@@ -2,14 +2,13 @@ import { app } from "../../scripts/app.js";
 import { openFilterLibrary } from "./filter_library.js";
 import { t } from "./i18n.js";
 
-// ---- PixiJS CDN ロード ----
+// ---- PixiJS ロード（web/lib/ に同梱したファイルをローカル配信） ----
+// CDN + SRI 方式は環境によって応答が改変されハッシュ不一致でブロックされるため同梱に変更
 async function loadPixiJS() {
   if (window.PIXI) return window.PIXI;
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js";
-    script.integrity = "sha512-4ZfEVGDoKT//8YicIXrm8r/GyfPWIDyPT06i3FfPqjRc0vKZld/q6dBQQqO1Uogst58ytaBTI7lY2eU1+jniKg==";
-    script.crossOrigin = "anonymous";
+    script.src = new URL("./lib/pixi.min.js", import.meta.url).href;
     script.onload = () => resolve(window.PIXI);
     script.onerror = reject;
     document.head.appendChild(script);
@@ -30,14 +29,12 @@ function makeSmallButton(label, bg, title = "") {
   return btn;
 }
 
-// ---- pixi-filters v5 CDN ロード (PixiJS v7 対応) ----
+// ---- pixi-filters v5 ロード (PixiJS v7 対応、web/lib/ に同梱) ----
 async function loadPixiFilters() {
   if (window.PIXI?.filters?.GlowFilter) return;
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/pixi-filters@5.3.0/dist/browser/pixi-filters.min.js";
-    script.integrity = "sha512-W4K7mPgbWSlASV5YU7vdblebNXYy2qWPEHKojeUvEqveGusO4XxW34iG+Rqh3pUAw1UeD9+wZkgEAweKc5LD+g==";
-    script.crossOrigin = "anonymous";
+    script.src = new URL("./lib/pixi-filters.min.js", import.meta.url).href;
     script.onload = () => resolve();
     script.onerror = reject;
     document.head.appendChild(script);
@@ -190,7 +187,7 @@ function getShapeTexture(PIXI, shapeType) {
 // パーティクルシステム基底 (PIXIJS)
 // ================================================================
 class ParticleSystem {
-  constructor(scene, PIXI, renderer, count, gradientFn, origin, direction, particleSize, strength, customTextures = null, particleRotation = 0, randomParticleRotation = false, randomScale = false, shapePreset = "default", randomShape = false, motionParams = null, spread = 1.0, scatterMode = false, charSet = []) {
+  constructor(scene, PIXI, renderer, count, gradientFn, origin, direction, particleSize, strength, customTextures = null, particleRotation = 0, randomParticleRotation = false, randomScale = false, shapePreset = "default", randomShape = false, motionParams = null, spread = 1.0, scatterMode = false, charSet = [], starStretch = 2.0) {
     this.PIXI = PIXI; this.scene = scene; this.renderer = renderer; this.count = count;
     this.gradientFn = gradientFn; this.origin = origin; this.direction = direction;
     this.particleSize = particleSize; this.strength = strength;
@@ -209,6 +206,7 @@ class ParticleSystem {
     this.spread                 = spread;
     this.scatterMode            = scatterMode;
     this.charSet                = (charSet && charSet.length > 0) ? charSet : null;
+    this.starStretch            = starStretch;
     this.init();
   }
   init(){} update(delta){}
@@ -407,9 +405,8 @@ class StarWarpSystem extends ParticleSystem {
     this.warpSpeed    = Math.max(0, Math.min(1, (this.strength - 0.2) / 2.8));
     this.fov          = 20;
     this.baseSpeed    = 0.025;
-    // 512px キャンバス基準: 1920px 相当の元サンプルに合わせてストレッチを補正
-    this.starStretch  = 2.0;
-    this.starBaseSize = Math.max(0.02, this.particleSize * 0.005);
+    // 伸び倍率はコンストラクタの starStretch パラメータ（Setting で調整可・デフォルト 2.0）を使用
+    this.starBaseSize = Math.max(0.02, this.particleSize * 0.015);
     this.stars        = [];
 
     for (let i = 0; i < this.count; i++) {
@@ -492,8 +489,8 @@ class NoneSystem extends ParticleSystem {
   update(_dt)  {}
 }
 
-function createParticleSystem(type,scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,customTextures=null,particleRotation=0,randomParticleRotation=false,randomScale=false,shapePreset="default",randomShape=false,motionParams=null,spread=1.0,scatterMode=false,charSet=[]) {
-  const ex = [customTextures, particleRotation, randomParticleRotation, randomScale, shapePreset, randomShape, motionParams, spread, scatterMode, charSet];
+function createParticleSystem(type,scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,customTextures=null,particleRotation=0,randomParticleRotation=false,randomScale=false,shapePreset="default",randomShape=false,motionParams=null,spread=1.0,scatterMode=false,charSet=[],starStretch=2.0) {
+  const ex = [customTextures, particleRotation, randomParticleRotation, randomScale, shapePreset, randomShape, motionParams, spread, scatterMode, charSet, starStretch];
   switch(type) {
     case "none":      return new NoneSystem     (scene,PIXI,renderer,0,    gradientFn,origin,direction,size,strength,...ex);
     case "smoke":     return new SmokeSystem    (scene,PIXI,renderer,count,gradientFn,origin,direction,size,strength,...ex);
@@ -585,7 +582,7 @@ app.registerExtension({
         if (pixiApp) { pixiApp.stage.filters = []; pixiApp.stage.filterArea = null; }
         const f = filterSettings.type;
         const p = filterSettings.params;
-        if (f === "none" || !PIXI.filters) return;
+        if (!filterEnabled || f === "none" || !PIXI.filters) return;
         const type = node.widgets?.find(w => w.name === "particle_type")?.value ?? "smoke";
         const PF = PIXI.filters;
         const hexColor = s => parseInt((s ?? "#ffffff").replace("#", ""), 16);
@@ -666,13 +663,107 @@ app.registerExtension({
                 center:      { x: (p.centerX ?? 0.5) * currentW, y: (p.centerY ?? 0.5) * currentH },
                 innerRadius: p.innerRadius ?? 0,
               });
+            case "adjustment":
+              return new PF.AdjustmentFilter({
+                gamma:      p.gamma      ?? 1,
+                saturation: p.saturation ?? 1,
+                contrast:   p.contrast   ?? 1,
+                brightness: p.brightness ?? 1,
+              });
+            case "hsl":
+              return new PF.HslAdjustmentFilter({
+                hue:        p.hue        ?? 0,
+                saturation: p.saturation ?? 0,
+                lightness:  p.lightness  ?? 0,
+              });
+            case "colorOverlay":
+              return new PF.ColorOverlayFilter(hexColor(p.color ?? "#ff0000"), p.alpha ?? 0.5);
+            case "grayscale":
+              return new PF.GrayscaleFilter();
+            case "advancedBloom":
+              return new PF.AdvancedBloomFilter({
+                threshold:  p.threshold  ?? 0.5,
+                bloomScale: p.bloomScale ?? 1,
+                brightness: p.brightness ?? 1,
+                blur:       p.blur       ?? 8,
+              });
+            case "ascii":
+              return new PF.AsciiFilter(p.size ?? 8);
+            case "bevel": {
+              const fil = new PF.BevelFilter({
+                rotation:    p.rotation    ?? 45,
+                thickness:   p.thickness   ?? 2,
+                lightColor:  hexColor(p.lightColor  ?? "#ffffff"),
+                lightAlpha:  p.lightAlpha  ?? 0.7,
+                shadowColor: hexColor(p.shadowColor ?? "#000000"),
+                shadowAlpha: p.shadowAlpha ?? 0.7,
+              });
+              fil.padding = Math.ceil(p.thickness ?? 2) + 4;
+              return fil;
+            }
+            case "bulgePinch":
+              return new PF.BulgePinchFilter({
+                center:   [p.centerX ?? 0.5, p.centerY ?? 0.5],
+                radius:   p.radius   ?? 150,
+                strength: p.strength ?? 0.5,
+              });
+            case "crossHatch":
+              return new PF.CrossHatchFilter();
+            case "emboss":
+              return new PF.EmbossFilter(p.strength ?? 5);
+            case "glitch":
+              return new PF.GlitchFilter({
+                slices:    p.slices    ?? 5,
+                offset:    p.offset    ?? 100,
+                direction: p.direction ?? 0,
+              });
+            case "godray":
+              return new PF.GodrayFilter({
+                angle:      p.angle      ?? 30,
+                gain:       p.gain       ?? 0.5,
+                lacunarity: p.lacunarity ?? 2.5,
+                parallel:   true,
+                time:       p.time       ?? 0,
+              });
+            case "radialBlur":
+              return new PF.RadialBlurFilter(
+                p.angle ?? 20,
+                [(p.centerX ?? 0.5) * currentW, (p.centerY ?? 0.5) * currentH],
+                p.kernelSize ?? 5
+              );
+            case "reflection":
+              return new PF.ReflectionFilter({
+                mirror:     true,
+                boundary:   p.boundary ?? 0.5,
+                amplitude:  [0, p.amplitude ?? 20],
+                waveLength: [30, p.waveLength ?? 100],
+                time:       p.time ?? 0,
+              });
+            case "shockwave":
+              return new PF.ShockwaveFilter(
+                [(p.centerX ?? 0.5) * currentW, (p.centerY ?? 0.5) * currentH],
+                { amplitude: p.amplitude ?? 30, wavelength: p.wavelength ?? 160 },
+                p.time ?? 0.5
+              );
+            case "tiltShift":
+              return new PF.TiltShiftFilter(p.blur ?? 100, p.gradientBlur ?? 600);
+            case "twist":
+              return new PF.TwistFilter({
+                angle:  p.angle  ?? 4,
+                radius: p.radius ?? 200,
+                offset: new PIXI.Point((p.centerX ?? 0.5) * currentW, (p.centerY ?? 0.5) * currentH),
+              });
             default: return null;
           }
         }
 
+        // 全面エフェクト型フィルター: 出力領域全体のアルファを 1.0 に強制するため、
+        // 透明レイヤー単位で適用すると不透明矩形化して背後を覆い隠す → 常に stage 全体に適用
+        const SCENE_WIDE = f === "godray";
+
         try {
-          if (type === "none") {
-            // particle_type=none: particleLayer が空のため stage に適用
+          if (type === "none" || SCENE_WIDE) {
+            // particle_type=none / 全面エフェクト型: stage に適用
             const fil = makeFilter();
             if (!fil) return;
             pixiApp.stage.filters = [fil];
@@ -733,6 +824,14 @@ app.registerExtension({
         node.properties.filterOnBg = filterOnBg;
       }
 
+      // ---- フィルター適用の ON/OFF（OFF で選択中フィルターを一時無効化） ----
+      let filterEnabled = node.properties?.filterEnabled ?? true;
+
+      function saveFilterEnabled() {
+        node.properties = node.properties || {};
+        node.properties.filterEnabled = filterEnabled;
+      }
+
       // ---- カスタムパーティクルテクスチャ（複数） ----
       // 旧形式（particleTextureUrl）からの移行も onConfigure で処理
       let customParticleTextures = []; // [{url: string, name: string, tex: PIXI.Texture|null}]
@@ -770,6 +869,7 @@ app.registerExtension({
         ? { ..._defMotionParams, ...node.properties.particleMotionParams }
         : { ..._defMotionParams };
       let globalStrength         = node.properties?.globalStrength ?? 1.0;
+      let starStretch            = node.properties?.starStretch    ?? 2.0;
       let currentBlendMode       = node.properties?.blendMode      ?? "default";
       let scatterMode            = node.properties?.scatterMode    ?? false;
       let particleCharSet        = node.properties?.particleCharSet ?? [];
@@ -790,6 +890,7 @@ app.registerExtension({
         node.properties.randomParticleShape    = randomParticleShape;
         node.properties.particleMotionParams   = { ...particleMotionParams };
         node.properties.globalStrength         = globalStrength;
+        node.properties.starStretch            = starStretch;
         node.properties.blendMode              = currentBlendMode;
         node.properties.particleCharSet        = particleCharSet;
       }
@@ -891,11 +992,18 @@ app.registerExtension({
       const getEmCtlY   = () => getSizeBarY()+SLIDER_UI_H+PREVIEW_MARGIN;
       const getPreviewY = () => getEmCtlY()+EM_CTL_H+PREVIEW_MARGIN;
       const getPreviewW = () => node.size[0]-PREVIEW_X*2;
-      const getPreviewH = () => {
+      // プレビュー領域はノード幅基準の正方形で固定（出力サイズを変えてもノード高さが変わらない）
+      const getPreviewH = () => getPreviewW();
+      // 固定プレビュー領域の内側に、出力の縦横比でフィットさせた表示矩形（レターボックス）
+      function getViewRect() {
+        const pw=getPreviewW(), ph=getPreviewH(), py=getPreviewY();
         const wv = parseInt(node.widgets?.find(w => w.name === "width")?.value  ?? 512);
         const hv = parseInt(node.widgets?.find(w => w.name === "height")?.value ?? 512);
-        return Math.round(getPreviewW() * hv / Math.max(1, wv));
-      };
+        const ar = wv/Math.max(1,hv);
+        const w  = ar>=1 ? pw : Math.round(ph*ar);
+        const h  = ar>=1 ? Math.round(pw/ar) : ph;
+        return {x:PREVIEW_X+(pw-w)/2, y:py+(ph-h)/2, w, h};
+      }
 
       // 動的ボタン矩形
       let plusBtnRect={x:0,y:0,w:24,h:16};
@@ -919,18 +1027,18 @@ app.registerExtension({
         if (bgSprite) { bgSprite.width = w; bgSprite.height = h; bgSprite.position.set(w / 2, h / 2); }
       }
 
-      // ---- 座標変換 ----
+      // ---- 座標変換（出力表示矩形 getViewRect 基準） ----
       function sceneToPreview(tx,ty) {
-        const pw=getPreviewW(),ph=getPreviewH(),py=getPreviewY();
-        return {x:PREVIEW_X+(tx/currentW+.5)*pw, y:py+(.5-ty/currentH)*ph};
+        const vr=getViewRect();
+        return {x:vr.x+(tx/currentW+.5)*vr.w, y:vr.y+(.5-ty/currentH)*vr.h};
       }
       function previewToScene(px,py_) {
-        const pw=getPreviewW(),ph=getPreviewH(),py=getPreviewY();
-        return {x:((px-PREVIEW_X)/pw-.5)*currentW, y:(.5-(py_-py)/ph)*currentH};
+        const vr=getViewRect();
+        return {x:((px-vr.x)/vr.w-.5)*currentW, y:(.5-(py_-vr.y)/vr.h)*currentH};
       }
       function clampToPreview(px,py_) {
-        const pw=getPreviewW(),ph=getPreviewH(),py=getPreviewY();
-        return {x:Math.max(PREVIEW_X,Math.min(PREVIEW_X+pw,px)), y:Math.max(py,Math.min(py+ph,py_))};
+        const vr=getViewRect();
+        return {x:Math.max(vr.x,Math.min(vr.x+vr.w,px)), y:Math.max(vr.y,Math.min(vr.y+vr.h,py_))};
       }
 
       // ---- ブレンドモード適用 ----
@@ -974,12 +1082,13 @@ app.registerExtension({
           : particleMotionParams;
         const _spread  = overrides?.spread         ?? particleSpread;
         const _gs      = overrides?.globalStrength ?? globalStrength;
+        const _stretch = overrides?.starStretch    ?? starStretch;
 
         for (const em of emitters) {
           particleSystems.push(createParticleSystem(
             type, particleLayer, PIXI, pixiApp.renderer, countPerEm, gradientFn,
             em.origin, em.direction, _size, getStrength(em) * _gs,
-            _texsArr, _rot, _randRot, _randSc, _shape, _randSh, _motion, _spread, scatterMode, particleCharSet
+            _texsArr, _rot, _randRot, _randSc, _shape, _randSh, _motion, _spread, scatterMode, particleCharSet, _stretch
           ));
         }
         applyFilter();
@@ -1147,7 +1256,8 @@ app.registerExtension({
 
         const {origin,dir}=getSelDirHandle();
         const onDirH=Math.hypot(mx-dir.x,my-dir.y)<16;
-        const inPreview=mx>=PREVIEW_X&&mx<=PREVIEW_X+pw&&my>=py&&my<=py+ph;
+        const vr=getViewRect();
+        const inPreview=mx>=vr.x&&mx<=vr.x+vr.w&&my>=vr.y&&my<=vr.y+vr.h;
 
         if (!inPreview&&!onDirH) return false;
 
@@ -1287,14 +1397,18 @@ app.registerExtension({
           emResetBtnRect.x+emResetBtnRect.w+8, emCtlY+EM_CTL_H/2
         );
 
-        ctx.fillStyle="#111"; ctx.fillRect(PREVIEW_X,py,pw,ph);
-        ctx.strokeStyle="#444"; ctx.lineWidth=1; ctx.strokeRect(PREVIEW_X,py,pw,ph);
-        try{ctx.drawImage(canvas,PREVIEW_X,py,pw,ph);}catch(_){}
+        // 固定プレビュー領域（レターボックス背景）+ 出力表示矩形
+        const vr=getViewRect();
+        ctx.fillStyle="#181818"; ctx.fillRect(PREVIEW_X,py,pw,ph);
+        ctx.strokeStyle="#333"; ctx.lineWidth=1; ctx.strokeRect(PREVIEW_X,py,pw,ph);
+        ctx.fillStyle="#111"; ctx.fillRect(vr.x,vr.y,vr.w,vr.h);
+        try{ctx.drawImage(canvas,vr.x,vr.y,vr.w,vr.h);}catch(_){}
+        ctx.strokeStyle="#555"; ctx.lineWidth=1; ctx.strokeRect(vr.x,vr.y,vr.w,vr.h);
 
         for (let i=0;i<emitters.length;i++) {
           const em=emitters[i];
           const p=sceneToPreview(em.origin.x,em.origin.y);
-          if (p.x<PREVIEW_X||p.x>PREVIEW_X+pw||p.y<py||p.y>py+ph) continue;
+          if (p.x<vr.x||p.x>vr.x+vr.w||p.y<vr.y||p.y>vr.y+vr.h) continue;
           const sel=i===selectedEmitterIdx;
           const cr=10;
           ctx.strokeStyle=sel?"rgba(100,200,255,1)":"rgba(100,200,255,0.4)";
@@ -1312,7 +1426,7 @@ app.registerExtension({
 
         const {origin,dir}=getSelDirHandle();
         ctx.save();
-        ctx.beginPath(); ctx.rect(PREVIEW_X,py,pw,ph); ctx.clip();
+        ctx.beginPath(); ctx.rect(vr.x,vr.y,vr.w,vr.h); ctx.clip();
         ctx.strokeStyle="rgba(255,220,50,0.85)"; ctx.lineWidth=2; ctx.setLineDash([4,3]);
         ctx.beginPath(); ctx.moveTo(origin.x,origin.y); ctx.lineTo(dir.x,dir.y); ctx.stroke();
         ctx.setLineDash([]);
@@ -1434,7 +1548,7 @@ app.registerExtension({
       const btnRow2Right = document.createElement("div");
       btnRow2Right.style.cssText = "display:flex;gap:4px;align-items:center;";
 
-      const filterLibBtn = makeSmallButton(t("filterLibrary"), "#4a4a8a", t("filterLibraryTitle"));
+      const filterLibBtn = makeSmallButton(t("settingBtn"), "#4a4a8a", t("filterLibraryTitle"));
       filterLibBtn.onclick = () => {
         openFilterLibrary({
           mainCanvas: canvas,
@@ -1450,6 +1564,7 @@ app.registerExtension({
             randomShape:    randomParticleShape,
             motionParams:   { ...particleMotionParams },
             globalStrength: globalStrength,
+            starStretch:    starStretch,
             charSet:        [...particleCharSet],
           },
           onPreview: settings => {
@@ -1482,6 +1597,7 @@ app.registerExtension({
             randomParticleShape       = particleSets.randomShape   ?? false;
             particleMotionParams      = { ..._defMotionParams, ...(particleSets.motionParams ?? {}) };
             globalStrength            = particleSets.globalStrength ?? 1.0;
+            starStretch               = particleSets.starStretch    ?? 2.0;
             particleCharSet           = particleSets.charSet ?? [];
             node.properties = node.properties || {};
             node.properties.particleTextures = customParticleTextures.map(t => ({ url: t.url, name: t.name }));
@@ -1518,7 +1634,25 @@ app.registerExtension({
           },
         });
       };
-      btnRow2Left.appendChild(filterLibBtn);
+      // Setting ボタンは1行目（Scatter の右隣）に配置
+      btnRow1.appendChild(filterLibBtn);
+
+      // フィルター適用 ON/OFF トグル
+      const filterToggleBtn = makeSmallButton(
+        filterEnabled ? t("filterToggleOn") : t("filterToggleOff"),
+        filterEnabled ? "#4a6a8a" : "#333344",
+        t("filterToggleTitle")
+      );
+      filterToggleBtn.onclick = () => {
+        filterEnabled = !filterEnabled;
+        filterToggleBtn.textContent = filterEnabled ? t("filterToggleOn") : t("filterToggleOff");
+        filterToggleBtn.style.background = filterEnabled ? "#4a6a8a" : "#333344";
+        saveFilterEnabled();
+        applyFilter();
+        if (!animating && pixiApp) pixiApp.render();
+        node.setDirtyCanvas(true, false);
+      };
+      btnRow2Left.appendChild(filterToggleBtn);
 
       // 背景画像＋パーティクルにまとめてフィルターを適用するトグル
       const filterOnBgBtn = makeSmallButton(
@@ -1644,6 +1778,11 @@ app.registerExtension({
           filterOnBgBtn.textContent = filterOnBg ? t("bgFilterOn") : t("bgFilterOff");
           filterOnBgBtn.style.background = filterOnBg ? "#4a4a8a" : "#333344";
         }
+        if (node.properties?.filterEnabled !== undefined) {
+          filterEnabled = node.properties.filterEnabled;
+          filterToggleBtn.textContent = filterEnabled ? t("filterToggleOn") : t("filterToggleOff");
+          filterToggleBtn.style.background = filterEnabled ? "#4a6a8a" : "#333344";
+        }
         if (node.properties?.blendMode !== undefined) {
           currentBlendMode = node.properties.blendMode;
           blendModeSelect.value = currentBlendMode;
@@ -1685,6 +1824,9 @@ app.registerExtension({
         }
         if (node.properties?.globalStrength !== undefined) {
           globalStrength = node.properties.globalStrength;
+        }
+        if (node.properties?.starStretch !== undefined) {
+          starStretch = node.properties.starStretch;
         }
         if (node.properties?.particleCharSet !== undefined) {
           particleCharSet = node.properties.particleCharSet;

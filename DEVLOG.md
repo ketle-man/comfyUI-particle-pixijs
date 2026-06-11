@@ -1145,3 +1145,93 @@ async function loadBackgroundSprite() {
 
 **未対応（次回バージョンバンプ時に解消予定）**:
 - タグ `v1.3.2` は pyproject.toml 追加前のコミット `08c5820` を指しており、レジストリ公開内容（master 先端）とタグ付きリリースの内容が一致しない。公開済みタグの付け替えは利用者に影響するため実施せず、v1.3.3 バンプ時にタグとコミットを揃える。
+
+---
+
+## セッション 12
+
+### フィルタライブラリのタブ化
+
+**目的**: フィルター数の増加に備え、フィルターとパーティクルの設定を独立したタブに分離する。
+
+**実装**（`filter_library.js`）:
+- 左パネル上部にタブバー「🎬 フィルター / ✨ パーティクル」を追加
+- フィルタータブ: フィルター一覧（基本 / 追加 / 色調整 / 特殊効果 の4セクション）
+- パーティクルタブ: Particle（テクスチャ・シェイプ）/ Parameters / Motion の3項目
+- タブごとに最後に選択した項目を記憶（`lastFilterKey` / `lastParticleKey`）し、切り替え時に右パネルへ復元
+- 左パネル幅 160px → 170px
+
+---
+
+### フィルター17種追加（合計29種）
+
+すべて既存の pixi-filters 5.3.0 バンドル同梱クラスのため追加ロード不要。
+
+| カテゴリ（新設） | フィルター |
+|---|---|
+| 色調整 | Adjustment / HSL / ColorOverlay / Grayscale |
+| 特殊効果 | AdvBloom / ASCII / Bevel / BulgePinch / CrossHatch / Emboss / Glitch / Godray / RadialBlur / Reflection / Shockwave / TiltShift / Twist |
+
+- `FILTER_CATALOG` にパラメータ定義、`makeFilter()` に生成 case、i18n に en/ja/zh のラベル・説明・パラメータ名を追加
+- 中心座標系フィルター（BulgePinch / RadialBlur / Shockwave / Twist）は 0〜1 正規化座標で指定し内部でキャンバス実寸に変換
+- Shockwave は `time=0` で波紋が見えないためデフォルト 0.5
+
+---
+
+### PixiJS / pixi-filters の同梱化（CDN SRI ブロック問題の解決）
+
+**症状**: ノードのカスタム UI が消えて標準ウィジェットのみ表示される。
+
+**原因**: pixi-filters の CDN スクリプトが SRI ハッシュ不一致でブロックされ `beforeRegisterNodeDef` が失敗。CDN から直接取得したファイルはコード内ハッシュと一致するが、ユーザー環境のブラウザには一貫して異なるバイト列が届いていた（ウイルス対策ソフトの HTTPS 検査等による改変と推定）。環境依存のため CDN + SRI では根本解決不可。
+
+**修正**: pixi.js 7.3.2 / pixi-filters 5.3.0 を `web/lib/` に同梱（取得時に従来の SRI ハッシュと一致することを検証済み）。ローダーを `new URL("./lib/...", import.meta.url)` のローカル配信に変更。外部依存がなくなりオフラインでも動作し、ComfyUI Registry のガイドライン（リモートコード回避）にも適合。
+
+---
+
+### プレビュー領域の固定化・レターボックス表示
+
+**症状**: width / height を変更するとプレビューの縦横比に合わせてノード高さが毎回変動する。
+
+**修正**:
+- `getPreviewH()` をノード幅基準の正方形固定に変更（出力サイズに非依存）
+- `getViewRect()` を新設し、固定プレビュー領域の内側に出力縦横比でフィットした表示矩形（レターボックス）を中央配置で描画
+- 座標変換（`sceneToPreview` / `previewToScene` / `clampToPreview`）とクリック判定・クリップ・エミッター可視判定をすべて表示矩形基準に変更
+- 余白は #181818、出力エリアは #111 + 明るめ枠線で区別
+
+---
+
+### Godray フィルターで背景画像が隠れるバグ修正
+
+**症状**: BG+Filter: ON で Godray を選択すると入力画像が黒背景に置き換わる。
+
+**根本原因**: Godray のシェーダーは `出力 = 元画像 + 光線` の加算合成だが、`mist.a = 1.0` により**出力領域全体を強制不透明化**する（全画面適用前提の設計）。透明なパーティクル層へ個別適用すると層全体が「不透明な黒＋光線」になり背後の bgSprite を覆い隠す。
+
+**修正**: `applyFilter()` に全面エフェクト型の分類（`SCENE_WIDE`）を導入し、Godray は `particle_type=none` と同じく stage 全体へ1インスタンスのみ適用。BG+Filter の ON/OFF にかかわらず常に画面全体に掛かる仕様とした。
+
+---
+
+### ボタン再配置・Filter ON/OFF トグル追加
+
+- 「🎬 Filter Library」→「⚙ Setting」に改名し、1行目（Scatter の右隣）へ移動
+- 2行目の BG+Filter 左隣に「🎬 Filter: ON/OFF」トグルを新設 — 選択中のフィルター設定を保持したまま適用のみ一時停止。`node.properties.filterEnabled` で永続化（デフォルト ON）。`applyFilter()` 冒頭の早期 return に条件を追加する実装のため、stage / particleLayer / bgSprite すべての適用経路で一貫して効く
+
+**新ボタン配置**:
+- 1行目: ▶ Play / ■ Stop & Capture / ✦ Scatter / ⚙ Setting
+- 2行目左: 🎬 Filter: ON/OFF / 🖼 BG+Filter / Blend ▾、右: 背景色トグル / ピッカー
+
+---
+
+### star_warp の視認性改善・Star Stretch パラメータ追加
+
+1. **星の基本サイズを3倍**: `starBaseSize = particleSize * 0.005` → `* 0.015`（Size 最大でも視認困難だったため）
+2. **光条の伸びを独立パラメータ化**: 内部固定値だった `starStretch = 2.0` を Setting → Particle → Parameters の「Star Stretch (star_warp)」スライダー（0〜6、step 0.1、デフォルト 2.0）として公開
+   - `ParticleSystem` コンストラクタ末尾に `starStretch = 2.0` パラメータを追加（`StarWarpSystem` のみ参照）
+   - `node.properties.starStretch` で永続化・`onConfigure` で復元・リアルタイムプレビュー対応
+
+伸びの決定式（参考）: `scale.y = distanceScale * starBaseSize + distanceScale * speed * starStretch * (dist/W)`。`speed` は「矢印長 × Global Strength」由来のワープ速度のため、Global Strength も間接的に伸びへ影響する。
+
+---
+
+### 運用メモ
+
+- インストール先 `C:\Users\statsu-11\AppData\Roaming\StabilityMatrix\Packages\ComfyUI_5\custom_nodes\comfyUI-particle-pixijs` はリポジトリとは**別フォルダ**（手動コピー運用）。web 変更時は `robocopy <repo>\web <inst>\web /E /XF *.bak` で同期する
