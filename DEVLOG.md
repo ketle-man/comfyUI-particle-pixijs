@@ -1108,3 +1108,40 @@ async function loadBackgroundSprite() {
 ```
 
 これにより複数の並行呼び出しが発生しても、最新の呼び出しの結果のみが反映される。
+
+---
+
+## セッション 11
+
+### ComfyUI Registry 公開準備
+
+**目的**: registry.comfy.org へカスタムノードを公開できるよう、メタデータと自動公開ワークフローを整備する。
+
+**実装内容**:
+- `pyproject.toml` を新規追加
+  - `[project]`: name=`comfyui-particle-pixijs` / version=`1.3.2` / license=`MIT` / requires-python `>= 3.10`
+  - `[tool.comfy]`: PublisherId=`statsu` / DisplayName=`Particle Renderer (PixiJS)` / Icon=`docs/images/thumb.png` の raw URL
+  - `dependencies = []` — torch / numpy / PIL / aiohttp はすべて ComfyUI 本体同梱のため宣言不要
+- `.github/workflows/publish.yml` を新規追加
+  - トリガー: `workflow_dispatch` + master への push（`pyproject.toml` 変更時のみ）
+  - `Comfy-Org/publish-node-action` でレジストリへ公開（シークレット `REGISTRY_ACCESS_TOKEN` を使用）
+
+---
+
+### コードレビューによるセキュリティ強化・体裁修正
+
+公開準備コミットに対するコードレビューで検出された問題を修正した。
+
+**1. publish-node-action の SHA 固定（サプライチェーン対策）**:
+- `@main` の可変参照では、アクション側リポジトリが侵害された場合に PAT（`REGISTRY_ACCESS_TOKEN`）が漏洩するリスクがある
+- 既存タグ `1.0.1` は main から大きく乖離した古いコミットを指しており採用見送り
+- 現時点の main の SHA `d2366e7abb6ab16f3bb03e3520ae25c8cf749bc9` に固定（コメントで取得日 2026-06-11 を記載）
+
+**2. workflow の権限最小化**:
+- `permissions: contents: read` を追加し、GITHUB_TOKEN を読み取り専用に制限
+
+**3. LICENSE ファイルの追加**:
+- pyproject.toml の `license = "MIT"` 宣言と README の「MIT License」表記に実体がなかったため、MIT ライセンス全文（Copyright (c) 2026 ketle-man）を追加
+
+**未対応（次回バージョンバンプ時に解消予定）**:
+- タグ `v1.3.2` は pyproject.toml 追加前のコミット `08c5820` を指しており、レジストリ公開内容（master 先端）とタグ付きリリースの内容が一致しない。公開済みタグの付け替えは利用者に影響するため実施せず、v1.3.3 バンプ時にタグとコミットを揃える。
