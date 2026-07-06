@@ -1,4 +1,6 @@
-import { app } from "../../scripts/app.js";
+// 注意: このモジュールは ComfyUI フロントエンド外（外部SPA）からも import されるため、
+// scripts/app.js を静的 import しないこと。ComfyUI 内では window.comfyAPI 経由で
+// ロケール設定を参照し、それ以外は navigator.language にフォールバックする。
 
 const TRANSLATIONS = {
   en: {
@@ -526,7 +528,9 @@ const TRANSLATIONS = {
 
 function detectLanguage() {
   try {
-    const locale = app.ui?.settings?.getSettingValue?.("Comfy.Locale") ?? "";
+    // ComfyUI フロントエンド内なら window.comfyAPI（新）/ window.app（旧）から設定を参照
+    const app = window.comfyAPI?.app?.app ?? window.app;
+    const locale = app?.ui?.settings?.getSettingValue?.("Comfy.Locale") ?? "";
     if (locale) {
       const code = locale.toLowerCase().split(/[-_]/)[0];
       if (code === "zh") return "zh";

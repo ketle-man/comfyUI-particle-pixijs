@@ -1235,3 +1235,47 @@ async function loadBackgroundSprite() {
 ### 運用メモ
 
 - インストール先 `C:\Users\statsu-11\AppData\Roaming\StabilityMatrix\Packages\ComfyUI_5\custom_nodes\comfyUI-particle-pixijs` はリポジトリとは**別フォルダ**（手動コピー運用）。web 変更時は `robocopy <repo>\web <inst>\web /E /XF *.bak` で同期する
+
+---
+
+## セッション 13
+
+### エンジン分離（particle_engine.js）— 外部SPAからの再利用対応
+
+**目的**: comfyui-comic-creater（SPA、`/ccc`）の画像編集・レイアウトタブから本ノードのパーティクル・フィルタ機能をモーダルとして利用できるようにする。
+
+**変更内容**:
+1. **`web/particle_engine.js` 新設**（ComfyUI 非依存の純粋モジュール）
+   - `particle_widget.js` から抽出: `loadPixiJS` / `loadPixiFilters` / カラーユーティリティ（`hexToRgb01` / `rgb01ToHex` / `lerpRgb` / `evalGradient`）/ `inRect` / シェイプテクスチャ（`getParticleTexture` / `getShapeTexture` / `PARTICLE_SHAPE_PRESETS`）/ パーティクルシステム全クラス / `createParticleSystem`
+   - `makeFilterInstance(PIXI, type, params, {width, height})` を新規 export（旧 `applyFilter` 内の `makeFilter` クロージャを引数化して移設）。全面エフェクト型判定は `SCENE_WIDE_FILTERS`（Set、現状 godray のみ）として export
+2. **`web/i18n.js`**: `import { app } from "../../scripts/app.js"` を除去し、`window.comfyAPI?.app?.app ?? window.app` から Comfy.Locale を参照（外部ページでは navigator.language フォールバック）。これにより i18n.js / filter_library.js / particle_engine.js が ComfyUI フロントエンド外から import 可能になった
+3. **`web/particle_widget.js`**: 上記を import する形にスリム化（約 480 行削減）。挙動は不変
+
+**外部からの利用方法**（SPA 側実装は comfyui-comic-creater リポジトリの `static/js/pixifx.js` 参照）:
+```js
+const engine    = await import("/extensions/comfyUI-particle-pixijs/particle_engine.js");
+const filterLib = await import("/extensions/comfyUI-particle-pixijs/filter_library.js");
+await engine.loadPixiJS(); await engine.loadPixiFilters();
+// createParticleSystem / makeFilterInstance / openFilterLibrary を利用
+```
+
+**注意**: `particle_engine.js` の export シグネチャは外部（comfyui-comic-creater）から参照されるため、変更時は互換性に注意すること。
+
+**確認**: ComfyUI リロードで particle_widget / particle_engine / pixi ライブラリのロード正常（ノード登録時の PIXI 初期化まで実行されることをネットワークログで確認）。SPA 側モーダルからのフィルタ・パーティクル適用も実機確認済み。
+
+### フィルターライブラリのプレビュー2倍化
+
+- プレビューキャンバス最大辺 `_maxPrev` を 320 → **640** に変更
+- 併せてダイアログ上限を `min(96vw,1000px) × min(94vh,680px)` → `min(96vw,1360px) × min(94vh,1060px)` に拡大（キャンバスは `max-width:100%; max-height:calc(100% - 40px)` で小さい画面では自動縮小）
+- ComfyUI ノード側・SPA（comfyui-comic-creater の PixiJS FX モーダル）側の両方に効く共通変更。インストール先へ同期済み
+
+### filter_library.js に外部統合用フック追加（後方互換）
+
+comic-creater SPA のモーダル統合のため、`openFilterLibrary` / `buildModal` に省略可能オプションを追加（未指定なら従来動作＝ComfyUIノード側は無変更）:
+
+- `topBar` — ヘッダーと3ペインの間に挿入する任意のコントロール行要素
+- `previewElement` — 中央ペインに表示する要素。指定時は内部のコピー用プレビュー canvas と描画ループを作らない（ライブcanvasをそのまま表示）
+- `saveLabel` — 保存ボタンのラベル差し替え
+- `onClose(saved)` — クローズ時コールバック（保存/キャンセル問わず最後に呼ばれる）
+
+cleanup は rafId が無い場合の cancelAnimationFrame をガードし、最後に `onClose?.(saved)` を呼ぶ。

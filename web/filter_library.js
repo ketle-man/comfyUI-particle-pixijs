@@ -190,17 +190,23 @@ export const FILTER_CATALOG = {
 };
 
 // ---- エクスポート: ライブラリを開く ----
-export function openFilterLibrary({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview }) {
+// 拡張オプション（すべて省略可・省略時は従来動作）:
+//   topBar         : ヘッダーと3ペインの間に挿入する任意のコントロール行（外部SPAの統合UI用）
+//   previewElement : 中央ペインに表示する要素。指定時は内部のコピー用プレビューcanvasを作らず、
+//                    この要素（ライブcanvas等）をそのまま表示する
+//   saveLabel      : 保存ボタンのラベル（既定: "✓ Apply & Close"）
+//   onClose        : クローズ時コールバック (saved: boolean) => void。保存/キャンセル問わず最後に呼ばれる
+export function openFilterLibrary({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview, topBar, previewElement, saveLabel, onClose }) {
   if (document.getElementById("filter-lib-modal")) return;
   document.body.appendChild(
-    buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview })
+    buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview, topBar, previewElement, saveLabel, onClose })
   );
 }
 
 // ================================================================
 // モーダル構築
 // ================================================================
-function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview }) {
+function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview, topBar = null, previewElement = null, saveLabel = null, onClose = null }) {
   const origSettings = JSON.parse(JSON.stringify(filterSettings));
   let   tempSettings = JSON.parse(JSON.stringify(filterSettings));
 
@@ -242,7 +248,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   // ---- Dialog ----
   const dialog = el("div", {
     style: "background:#1e1e2e;color:#ccc;border-radius:10px;" +
-           "width:min(96vw,1000px);height:min(94vh,680px);display:flex;flex-direction:column;" +
+           "width:min(96vw,1360px);height:min(94vh,1060px);display:flex;flex-direction:column;" +
            "box-shadow:0 8px 40px rgba(0,0,0,0.85);overflow:hidden;font-family:sans-serif;",
   });
 
@@ -403,24 +409,31 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     style: "flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
            "background:#111118;padding:16px;gap:10px;",
   });
-  const previewCanvas = document.createElement("canvas");
-  const _maxPrev = 320;
-  const _mw = mainCanvas.width  || 512;
-  const _mh = mainCanvas.height || 512;
-  const _ratio = _mw / _mh;
-  previewCanvas.width  = _ratio >= 1 ? _maxPrev : Math.round(_maxPrev * _ratio);
-  previewCanvas.height = _ratio >= 1 ? Math.round(_maxPrev / _ratio) : _maxPrev;
-  previewCanvas.style.cssText =
-    "border-radius:6px;box-shadow:0 2px 16px rgba(0,0,0,0.7);" +
-    "max-width:100%;max-height:calc(100% - 40px);object-fit:contain;";
-  const previewCtx = previewCanvas.getContext("2d");
-  const previewInfo = el("div", {
-    style: "font-size:11px;color:#555;text-align:center;",
-  }, t("previewInfo"));
-  centerPanel.append(previewCanvas, previewInfo);
+  let previewCanvas = null, previewCtx = null;
+  if (previewElement) {
+    // 外部提供のライブプレビュー要素（コピー描画は行わない）
+    centerPanel.appendChild(previewElement);
+  } else {
+    previewCanvas = document.createElement("canvas");
+    const _maxPrev = 640;
+    const _mw = mainCanvas.width  || 512;
+    const _mh = mainCanvas.height || 512;
+    const _ratio = _mw / _mh;
+    previewCanvas.width  = _ratio >= 1 ? _maxPrev : Math.round(_maxPrev * _ratio);
+    previewCanvas.height = _ratio >= 1 ? Math.round(_maxPrev / _ratio) : _maxPrev;
+    previewCanvas.style.cssText =
+      "border-radius:6px;box-shadow:0 2px 16px rgba(0,0,0,0.7);" +
+      "max-width:100%;max-height:calc(100% - 40px);object-fit:contain;";
+    previewCtx = previewCanvas.getContext("2d");
+    const previewInfo = el("div", {
+      style: "font-size:11px;color:#555;text-align:center;",
+    }, t("previewInfo"));
+    centerPanel.append(previewCanvas, previewInfo);
+  }
 
   let rafId = null;
   function startPreviewLoop() {
+    if (!previewCanvas) return;
     const pw = previewCanvas.width, ph = previewCanvas.height;
     function loop() {
       try {
@@ -1006,7 +1019,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   });
   const cancelBtn = mkBtn(t("cancel"), "#4a4a4a");
   cancelBtn.onclick = () => cleanup(false);
-  const saveBtn = mkBtn(t("applyAndClose"), "#3a7a3a");
+  const saveBtn = mkBtn(saveLabel ?? t("applyAndClose"), "#3a7a3a");
   saveBtn.onclick = () => {
     onSave(JSON.parse(JSON.stringify(tempSettings)), { ...tempParticle });
     cleanup(true);
@@ -1015,7 +1028,8 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
 
   // ---- 組み立て ----
   body.append(leftPanel, centerPanel, rightPanel);
-  dialog.append(header, body, footer);
+  if (topBar) dialog.append(header, topBar, body, footer);
+  else        dialog.append(header, body, footer);
   overlay.appendChild(dialog);
 
   // ---- フィルター選択 ----
@@ -1061,12 +1075,13 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
 
   // ---- クリーンアップ ----
   function cleanup(saved) {
-    cancelAnimationFrame(rafId);
+    if (rafId) cancelAnimationFrame(rafId);
     if (!saved) {
       onPreview(origSettings);
       onParticlePreview?.(null);
     }
     overlay.remove();
+    onClose?.(saved);
   }
 
   // ---- 初期化 ----
