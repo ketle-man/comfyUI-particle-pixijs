@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-particle-pixijs"
 description = "A ComfyUI custom node that renders PixiJS particle effects (smoke, spark, ray, star warp) onto a canvas and outputs the result as an image."
-version = "1.4.0"
+version = "1.5.0"
 license = "MIT"
 requires-python = ">= 3.10"
 dependencies = []
