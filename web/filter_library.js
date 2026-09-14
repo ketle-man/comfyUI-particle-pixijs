@@ -1116,11 +1116,7 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
     rightPanel.replaceChildren();
 
     rightPanel.appendChild(el("div", {
-      style: "font-size:14px;font-weight:bold;color:#aaffcc;padding-bottom:5px;" +
-             "border-bottom:1px solid #333;margin-bottom:4px;",
-    }, t("tabMulti")));
-    rightPanel.appendChild(el("div", {
-      style: "font-size:11px;color:#778;margin-bottom:10px;",
+      style: "font-size:11px;color:#778;padding-bottom:5px;border-bottom:1px solid #333;margin-bottom:10px;",
     }, t("multiStackDesc")));
 
     const stackListEl = el("div", {

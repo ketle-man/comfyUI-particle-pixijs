@@ -493,6 +493,25 @@ export function createParticleSystem(type,scene,PIXI,renderer,count,gradientFn,o
 // 透明レイヤー単位で適用すると不透明矩形化して背後を覆い隠す → 常に stage 全体に適用すること
 export const SCENE_WIDE_FILTERS = new Set(["godray"]);
 
+// ---- 決定論的な疑似乱数（GlitchFilter のスライス配置を安定させるために使用） ----
+// PIXI.filters.GlitchFilter はスライスの分割・オフセットを内部で Math.random() を使って
+// 生成しており、seed オプションは色ズレ量の計算にのみ使われスライス配置には影響しない
+// （pixi-filters 側の仕様）。そのため同じパラメーターで生成しても毎回見た目が変わる。
+// 生成中だけ Math.random を差し替えることで、同じパラメーターなら毎回同じ配置になるようにする。
+function hashSeed(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  return h >>> 0;
+}
+function mulberry32(seed) {
+  return function () {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /**
  * フィルターインスタンスを生成するファクトリ（呼ぶたびに新規インスタンスを返す）。
  * 同一インスタンスを複数コンテナに割り当てると内部状態が競合するため毎回生成する。
@@ -631,12 +650,18 @@ export function makeFilterInstance(PIXI, type, params, ctx) {
       return new PF.CrossHatchFilter();
     case "emboss":
       return new PF.EmbossFilter(p.strength ?? 5);
-    case "glitch":
-      return new PF.GlitchFilter({
-        slices:    p.slices    ?? 5,
-        offset:    p.offset    ?? 100,
-        direction: p.direction ?? 0,
-      });
+    case "glitch": {
+      // スライス配置の乱数生成を決定論的にし、同じパラメーターなら毎回同じ見た目にする
+      const slices = p.slices ?? 5, offset = p.offset ?? 100, direction = p.direction ?? 0;
+      const rand = mulberry32(hashSeed(`glitch:${slices}:${offset}:${direction}`));
+      const origRandom = Math.random;
+      Math.random = rand;
+      try {
+        return new PF.GlitchFilter({ slices, offset, direction });
+      } finally {
+        Math.random = origRandom;
+      }
+    }
     case "godray":
       return new PF.GodrayFilter({
         angle:      p.angle      ?? 30,
