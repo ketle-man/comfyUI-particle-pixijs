@@ -338,8 +338,7 @@ export function openFilterLibrary({ mainCanvas, filterStack, particleSettings, o
 function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSave, onParticlePreview, onLoadMultiPresets, onSaveMultiPreset, onDeleteMultiPreset, topBar = null, previewElement = null, saveLabel = null, onClose = null }) {
   const origStack = JSON.parse(JSON.stringify(filterStack));
   let   tempStack = JSON.parse(JSON.stringify(filterStack));
-  let   selectedRowIdx     = 0;     // マルチタブで選択/展開中の行インデックス
-  let   assigningRowIdx    = null;  // カタログ割り当てモード対象の行（null なら非カタログモード）
+  let   selectedRowIdx     = 0;     // スタック内で選択/展開中の行インデックス（フィルターカタログでの割り当て対象でもある）
   let   multiPresets       = [];    // [{name, stack}]
   let   multiPresetsLoaded = false;
   let   refreshMultiPanel  = () => {}; // buildMultiPanel() 実行後に差し替えられる再描画フック（Clearボタン用）
@@ -454,11 +453,11 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
     particleListEl.style.display = id === "particle" ? "" : "none";
     multiListEl.style.display    = id === "multi"    ? "" : "none";
     if (id === "filter") {
-      showFilterTab();
-    } else if (id === "multi") {
-      assigningRowIdx = null;
+      highlightFilterCatalog(tempStack[selectedRowIdx]?.type ?? null);
       buildMultiPanel();
-      showMultiPresetPane();
+    } else if (id === "multi") {
+      buildMultiPanel();
+      loadMultiPresetsOnce().then(refreshMultiPresetList);
     } else if (lastParticleKey === "particle_params") {
       selectParticleParams();
     } else if (lastParticleKey === "particle_motion") {
@@ -468,9 +467,9 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
     }
   }
 
-  // ---- フィルタータブ: フィルター一覧 ----
-  const { items: filterItems, highlight: highlightFilterCatalog } =
-    buildCatalogList(filterListEl, key => selectFilter(key), () => currentKey);
+  // ---- フィルタータブ: フィルター一覧（常時表示、選択中の行に割り当てる） ----
+  const { highlight: highlightFilterCatalog } =
+    buildCatalogList(filterListEl, key => assignSelectedRowType(key), () => tempStack[selectedRowIdx]?.type);
 
   // ---- パーティクルタブ: 設定項目 ----
   const particleItem = el("div", {
@@ -512,8 +511,7 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
   particleMotionItem.addEventListener("click", () => selectParticleMotion());
   particleListEl.appendChild(particleMotionItem);
 
-  function highlightList(activeKey) {
-    highlightFilterCatalog(activeKey);
+  function highlightParticleList(activeKey) {
     const pSel = activeKey === "particle_settings";
     particleItem.style.background      = pSel ? "#2a2a5a" : "";
     particleItem.style.borderLeftColor = pSel ? "#da8a4a" : "transparent";
@@ -575,30 +573,6 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
     style: "width:270px;flex-shrink:0;border-left:1px solid #2a2a4a;overflow-y:auto;" +
            "background:#1a1a28;padding:10px 14px;display:flex;flex-direction:column;gap:0;",
   });
-
-  // ---- フィルターパラメータパネル（フィルタータブ、tempStack[0] を対象） ----
-  function buildParamPanel(key) {
-    rightPanel.replaceChildren();
-    const def = FILTER_CATALOG[key];
-    if (!def) return;
-
-    renderFilterHeader(rightPanel, def);
-
-    if (def.params.length === 0) {
-      rightPanel.appendChild(
-        el("div", { style: "color:#666;font-size:12px;padding:8px 0;" }, t("noParams"))
-      );
-      return;
-    }
-
-    renderParamRows(rightPanel, def, {
-      getParam: k => tempStack[0].params[k],
-      setParam: (k, v) => {
-        tempStack[0].params[k] = v;
-        onPreview(JSON.parse(JSON.stringify(tempStack)));
-      },
-    });
-  }
 
   // ---- パーティクル設定パネル（テクスチャ＋シェイプ） ----
   const SHAPE_LIST = [
@@ -1082,31 +1056,9 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
     }
   }
 
-  // ---- マルチタブ: 左ペイン（プリセット一覧 / カタログ割り当て） ----
+  // ---- マルチタブ: 左ペイン（保存済みレシピ〔プリセット〕一覧のみ） ----
   const multiPresetListWrapEl = el("div");
-  const multiCatalogWrapEl    = el("div", { style: "display:none;" });
-  multiListEl.append(multiPresetListWrapEl, multiCatalogWrapEl);
-
-  const multiCatalogBackBtn = el("div", {
-    style: "padding:7px 12px;cursor:pointer;font-size:12px;color:#8ac0e0;" +
-           "border-bottom:1px solid #2a2a4a;margin-bottom:4px;user-select:none;",
-  }, "◀ " + t("backToPresetList"));
-  multiCatalogBackBtn.addEventListener("click", () => { assigningRowIdx = null; showMultiPresetPane(); });
-  const multiCatalogListEl = el("div");
-  multiCatalogWrapEl.append(multiCatalogBackBtn, multiCatalogListEl);
-
-  let multiCatalogBuilt      = false;
-  let highlightMultiCatalog  = null;
-
-  function showMultiPresetPane() {
-    multiCatalogWrapEl.style.display    = "none";
-    multiPresetListWrapEl.style.display = "";
-    loadMultiPresetsOnce().then(refreshMultiPresetList);
-  }
-  function showMultiCatalogPane() {
-    multiPresetListWrapEl.style.display = "none";
-    multiCatalogWrapEl.style.display    = "";
-  }
+  multiListEl.append(multiPresetListWrapEl);
 
   async function loadMultiPresetsOnce() {
     if (multiPresetsLoaded) return;
@@ -1133,7 +1085,10 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
       const nameEl = el("span", {
         style: "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
       }, preset.name);
-      nameEl.addEventListener("click", () => loadMultiPreset(preset));
+      nameEl.addEventListener("click", () => {
+        if (!confirm(t("confirmLoadPreset", preset.name))) return;
+        loadMultiPreset(preset);
+      });
       const delBtn = el("button", {
         style: "background:none;border:none;color:#a66;cursor:pointer;font-size:13px;padding:0 4px;flex-shrink:0;",
       }, "×");
@@ -1152,8 +1107,6 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
   function loadMultiPreset(preset) {
     tempStack      = JSON.parse(JSON.stringify(preset.stack));
     selectedRowIdx = 0;
-    assigningRowIdx = null;
-    showMultiPresetPane();
     refreshMultiPanel();
     onPreview(JSON.parse(JSON.stringify(tempStack)));
   }
@@ -1200,13 +1153,18 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
         }, row.type === "none" ? t("clickToAssignFilter") : t(FILTER_CATALOG[row.type]?.labelKey ?? "filterNoneLabel"));
         rowEl.append(toggleTri, chk, label);
         rowEl.addEventListener("click", () => {
-          if (assigningRowIdx !== null) { assigningRowIdx = null; showMultiPresetPane(); }
           selectedRowIdx = idx;
+          if (row.type === "none") {
+            // 未割り当ての行を選ぶと、カタログで選べるようにフィルタータブへ切り替える
+            setTab("filter");
+            return;
+          }
           refreshStackList();
           refreshMultiParamArea();
         });
         stackListEl.appendChild(rowEl);
       });
+      highlightFilterCatalog(tempStack[selectedRowIdx]?.type ?? null);
     }
 
     function refreshMultiParamArea() {
@@ -1237,43 +1195,13 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
       onPreview(JSON.parse(JSON.stringify(tempStack)));
     }
 
-    function enterCatalogAssignMode(rowIdx) {
-      assigningRowIdx = rowIdx;
-      showMultiCatalogPane();
-      if (!multiCatalogBuilt) {
-        const built = buildCatalogList(
-          multiCatalogListEl,
-          key => assignRowType(key),
-          () => (assigningRowIdx !== null ? tempStack[assigningRowIdx]?.type : null)
-        );
-        highlightMultiCatalog = built.highlight;
-        multiCatalogBuilt = true;
-      }
-      highlightMultiCatalog?.(tempStack[rowIdx].type);
-    }
-
-    function assignRowType(key) {
-      if (assigningRowIdx === null) return;
-      const def = FILTER_CATALOG[key];
-      if (!def) return;
-      const prevRow = tempStack[assigningRowIdx];
-      const newParams = resolveParamsForType(key, def, [prevRow]);
-      tempStack[assigningRowIdx] = { type: key, params: newParams, enabled: prevRow?.enabled ?? true };
-      highlightMultiCatalog?.(key);
-      selectedRowIdx = assigningRowIdx;
-      refreshStackList();
-      refreshMultiParamArea();
-      notifyMultiPreview();
-    }
-
     const addBtn = mkBtn("+", "#3a5a3a");
     addBtn.title = t("addFilterRow");
     addBtn.onclick = () => {
       tempStack.push({ type: "none", params: {}, enabled: true });
       selectedRowIdx = tempStack.length - 1;
-      refreshStackList();
-      refreshMultiParamArea();
-      enterCatalogAssignMode(selectedRowIdx);
+      // フィルタータブ(カタログ)へ自動切替。既にフィルタータブなら単に再描画される。
+      setTab("filter");
     };
 
     const removeBtn = mkBtn("−", "#5a3a3a");
@@ -1315,7 +1243,7 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
       const idx = multiPresets.findIndex(p => p.name === name);
       const entry = { name, stack: stackCopy };
       if (idx >= 0) multiPresets[idx] = entry; else multiPresets.push(entry);
-      refreshMultiPresetList();
+      setTab("multi"); // 保存結果が一覧に反映されたことを見せる
     };
 
     toolbarEl.append(addBtn, removeBtn, upBtn, downBtn, savePresetBtn);
@@ -1354,53 +1282,37 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
   else        dialog.append(header, body, footer);
   overlay.appendChild(dialog);
 
-  // ---- フィルタータブ表示（非破壊: クリックするまでスタックは変更しない） ----
-  function showFilterTab() {
-    if (tempStack.length === 1) {
-      currentKey = tempStack[0].type;
-      highlightList(currentKey);
-      buildParamPanel(currentKey);
-    } else {
-      currentKey = null;
-      highlightList(null);
-      rightPanel.replaceChildren();
-      rightPanel.appendChild(el("div", {
-        style: "color:#889;font-size:12px;padding:12px 4px;line-height:1.6;",
-      }, t("clickToAssignFilter")));
-    }
-  }
-
-  // ---- フィルター選択（カタログクリック時のみ呼ばれる: スタック全体を1エントリで置き換える） ----
-  function selectFilter(key) {
+  // ---- カタログでフィルターを選ぶと、選択中の行(selectedRowIdx)に即座に割り当てる ----
+  // 右ペインは常にマルチのスタック編集UIのみなので、タブを行き来する必要はない。
+  function assignSelectedRowType(key) {
     const def = FILTER_CATALOG[key];
     if (!def) return;
-    currentKey = key;
-    const newParams = resolveParamsForType(key, def, [origStack[0], tempStack[0]]);
-    tempStack = [{ type: key, params: newParams, enabled: true }];
-    selectedRowIdx = 0;
-    highlightList(key);
-    buildParamPanel(key);
+    const prevRow = tempStack[selectedRowIdx];
+    const newParams = resolveParamsForType(key, def, [prevRow]);
+    tempStack[selectedRowIdx] = { type: key, params: newParams, enabled: prevRow?.enabled ?? true };
+    highlightFilterCatalog(key);
+    refreshMultiPanel();
     onPreview(JSON.parse(JSON.stringify(tempStack)));
   }
 
   function selectParticle() {
     currentKey      = "particle_settings";
     lastParticleKey = "particle_settings";
-    highlightList("particle_settings");
+    highlightParticleList("particle_settings");
     buildParticleParamPanel();
   }
 
   function selectParticleParams() {
     currentKey      = "particle_params";
     lastParticleKey = "particle_params";
-    highlightList("particle_params");
+    highlightParticleList("particle_params");
     buildParticleParamsPanel();
   }
 
   function selectParticleMotion() {
     currentKey      = "particle_motion";
     lastParticleKey = "particle_motion";
-    highlightList("particle_motion");
+    highlightParticleList("particle_motion");
     buildMotionPanel();
   }
 
@@ -1416,7 +1328,7 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
   }
 
   // ---- 初期化 ----
-  setTab(tempStack.length > 1 ? "multi" : "filter");
+  setTab("filter");
   startPreviewLoop();
   requestAnimationFrame(() => overlay.focus());
 

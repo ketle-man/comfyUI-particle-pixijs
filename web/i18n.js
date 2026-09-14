@@ -180,6 +180,7 @@ const TRANSLATIONS = {
     multiPresetListEmpty: "No saved presets yet",
     loadingPresets:     "Loading presets...",
     confirmDeletePreset: name => `Delete preset "${name}"?`,
+    confirmLoadPreset:  name => `Load preset "${name}"? This will overwrite the current filter list.`,
     savePreset:         "💾 Save",
     presetNamePrompt:   "Preset name:",
     addFilterRow:       "Add filter",
@@ -188,7 +189,6 @@ const TRANSLATIONS = {
     moveFilterDown:     "Move down",
     clearFilters:       "Clear",
     clickToAssignFilter: "+ Click to assign a filter",
-    backToPresetList:   "Back to preset list",
   },
 
   ja: {
@@ -368,6 +368,7 @@ const TRANSLATIONS = {
     multiPresetListEmpty: "保存済みプリセットはまだありません",
     loadingPresets:     "プリセットを読み込み中...",
     confirmDeletePreset: name => `プリセット「${name}」を削除しますか？`,
+    confirmLoadPreset:  name => `プリセット「${name}」を読み込みますか？現在のフィルター一覧は上書きされます。`,
     savePreset:         "💾 保存",
     presetNamePrompt:   "プリセット名:",
     addFilterRow:       "フィルターを追加",
@@ -376,7 +377,6 @@ const TRANSLATIONS = {
     moveFilterDown:     "下へ移動",
     clearFilters:       "Clear",
     clickToAssignFilter: "+ をクリックしてフィルターを選択",
-    backToPresetList:   "プリセット一覧に戻る",
   },
 
   zh: {
@@ -556,6 +556,7 @@ const TRANSLATIONS = {
     multiPresetListEmpty: "尚无已保存的预设",
     loadingPresets:     "正在加载预设...",
     confirmDeletePreset: name => `删除预设「${name}」吗？`,
+    confirmLoadPreset:  name => `加载预设「${name}」吗？当前的滤镜列表将被覆盖。`,
     savePreset:         "💾 保存",
     presetNamePrompt:   "预设名称：",
     addFilterRow:       "添加滤镜",
@@ -564,7 +565,6 @@ const TRANSLATIONS = {
     moveFilterDown:     "下移",
     clearFilters:       "清除",
     clickToAssignFilter: "+ 点击选择滤镜",
-    backToPresetList:   "返回预设列表",
   },
 };
 
