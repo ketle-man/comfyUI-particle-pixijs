@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 import { openFilterLibrary } from "./filter_library.js";
 import { t } from "./i18n.js";
 import {
@@ -84,13 +85,51 @@ app.registerExtension({
       let animating=false, animFrameId=null;
       let currentW=512, currentH=512;
 
-      let filterSettings = node.properties?.filterSettings
-        ? JSON.parse(JSON.stringify(node.properties.filterSettings))
-        : { type: "none", params: {} };
+      // フィルタースタック: [{type, params, enabled}, ...]。単一フィルターは要素数1の状態にすぎない。
+      let filterStack = node.properties?.filterStack?.length
+        ? JSON.parse(JSON.stringify(node.properties.filterStack))
+        : [{ type: "none", params: {}, enabled: true }];
 
       function saveFilterSettings() {
         node.properties = node.properties || {};
-        node.properties.filterSettings = JSON.parse(JSON.stringify(filterSettings));
+        node.properties.filterStack = JSON.parse(JSON.stringify(filterStack));
+      }
+
+      // ---- マルチフィルタープリセットの永続化（ComfyUI userdata API） ----
+      const MULTI_PRESET_FILE = "Particle Renderer (PixiJS)/multi_filter_presets.json";
+
+      async function loadMultiPresetsFromServer() {
+        try {
+          const res = await api.getUserData(MULTI_PRESET_FILE);
+          if (!res.ok) return [];
+          const arr = await res.json();
+          return Array.isArray(arr) ? arr : [];
+        } catch (e) {
+          console.warn("[ParticleRenderer] loadMultiPresets failed:", e);
+          return [];
+        }
+      }
+
+      async function saveMultiPresetToServer(name, stack) {
+        const list = await loadMultiPresetsFromServer();
+        const idx = list.findIndex(p => p.name === name);
+        const entry = { name, stack };
+        if (idx >= 0) list[idx] = entry; else list.push(entry);
+        try {
+          await api.storeUserData(MULTI_PRESET_FILE, list, { stringify: true, overwrite: true });
+        } catch (e) {
+          console.warn("[ParticleRenderer] saveMultiPreset failed:", e);
+        }
+      }
+
+      async function deleteMultiPresetFromServer(name) {
+        const list = await loadMultiPresetsFromServer();
+        const filtered = list.filter(p => p.name !== name);
+        try {
+          await api.storeUserData(MULTI_PRESET_FILE, filtered, { stringify: true, overwrite: true });
+        } catch (e) {
+          console.warn("[ParticleRenderer] deleteMultiPreset failed:", e);
+        }
       }
 
       function applyFilter() {
@@ -101,33 +140,47 @@ app.registerExtension({
         particleLayer.filters = [];
         if (bgSprite) bgSprite.filters = [];
         if (pixiApp) { pixiApp.stage.filters = []; pixiApp.stage.filterArea = null; }
-        const f = filterSettings.type;
-        const p = filterSettings.params;
-        if (!filterEnabled || f === "none" || !PIXI.filters) return;
+        if (!filterEnabled || !PIXI.filters) return;
+
+        const activeRows = filterStack.filter(row => row.enabled !== false && row.type !== "none");
+        if (activeRows.length === 0) return;
+
         const type = node.widgets?.find(w => w.name === "particle_type")?.value ?? "smoke";
 
         // フィルターインスタンス生成は particle_engine.js に集約
         // （同一インスタンスの複数コンテナ割り当ては競合するため毎回新規生成）
-        const makeFilter = () => makeFilterInstance(PIXI, f, p, { width: currentW, height: currentH });
-        const SCENE_WIDE = SCENE_WIDE_FILTERS.has(f);
+        const makeFilter = row => makeFilterInstance(PIXI, row.type, row.params, { width: currentW, height: currentH });
 
         try {
-          if (type === "none" || SCENE_WIDE) {
-            // particle_type=none / 全面エフェクト型: stage に適用
-            const fil = makeFilter();
-            if (!fil) return;
-            pixiApp.stage.filters = [fil];
-            const pad = fil.padding ?? 0;
+          if (type === "none") {
+            // particle_type=none: 全フィルターを順序通り stage にまとめて適用
+            const fils = activeRows.map(makeFilter).filter(Boolean);
+            if (fils.length === 0) return;
+            pixiApp.stage.filters = fils;
+            const pad = Math.max(0, ...fils.map(f => f.padding ?? 0));
             pixiApp.stage.filterArea = new PIXI.Rectangle(-pad, -pad, currentW + pad * 2, currentH + pad * 2);
-          } else {
-            // パーティクルレイヤーに適用（常に）
-            const fil = makeFilter();
-            if (!fil) return;
-            particleLayer.filters = [fil];
+            return;
+          }
+
+          // SCENE_WIDE系（godray等）とレイヤー系フィルターとで適用先コンテナを分ける
+          const sceneWideRows = activeRows.filter(row => SCENE_WIDE_FILTERS.has(row.type));
+          const layerRows     = activeRows.filter(row => !SCENE_WIDE_FILTERS.has(row.type));
+
+          if (layerRows.length > 0) {
+            const layerFils = layerRows.map(makeFilter).filter(Boolean);
+            if (layerFils.length > 0) particleLayer.filters = layerFils;
             // BG+Filter: ON かつ bgSprite あり → 背景画像にも個別インスタンスで適用
             if (filterOnBg && bgSprite) {
-              const filBg = makeFilter();
-              if (filBg) bgSprite.filters = [filBg];
+              const bgFils = layerRows.map(makeFilter).filter(Boolean);
+              if (bgFils.length > 0) bgSprite.filters = bgFils;
+            }
+          }
+          if (sceneWideRows.length > 0) {
+            const stageFils = sceneWideRows.map(makeFilter).filter(Boolean);
+            if (stageFils.length > 0) {
+              pixiApp.stage.filters = stageFils;
+              const pad = Math.max(0, ...stageFils.map(f => f.padding ?? 0));
+              pixiApp.stage.filterArea = new PIXI.Rectangle(-pad, -pad, currentW + pad * 2, currentH + pad * 2);
             }
           }
         } catch(e) {
@@ -902,7 +955,7 @@ app.registerExtension({
       filterLibBtn.onclick = () => {
         openFilterLibrary({
           mainCanvas: canvas,
-          filterSettings,
+          filterStack,
           particleSettings: {
             textures:       customParticleTextures.map(t => ({ url: t.url, name: t.name })),
             size:           currentSize,
@@ -917,17 +970,18 @@ app.registerExtension({
             starStretch:    starStretch,
             charSet:        [...particleCharSet],
           },
-          onPreview: settings => {
-            filterSettings.type   = settings.type;
-            filterSettings.params = settings.params;
+          onPreview: stack => {
+            filterStack = stack;
             applyFilter();
             if (!animating && pixiApp) pixiApp.render();
             node.setDirtyCanvas(true, false);
           },
-          onSave: (filterSets, particleSets) => {
+          onLoadMultiPresets:   loadMultiPresetsFromServer,
+          onSaveMultiPreset:    saveMultiPresetToServer,
+          onDeleteMultiPreset:  deleteMultiPresetFromServer,
+          onSave: (stack, particleSets) => {
             // フィルター設定
-            filterSettings.type   = filterSets.type;
-            filterSettings.params = filterSets.params;
+            filterStack = stack;
             saveFilterSettings();
             applyFilter();
 
@@ -1113,8 +1167,8 @@ app.registerExtension({
         if (node.properties?.emitters) {
           emitters = JSON.parse(JSON.stringify(node.properties.emitters));
         }
-        if (node.properties?.filterSettings) {
-          filterSettings = JSON.parse(JSON.stringify(node.properties.filterSettings));
+        if (node.properties?.filterStack?.length) {
+          filterStack = JSON.parse(JSON.stringify(node.properties.filterStack));
         }
         if (node.properties?.bgColorOn !== undefined) {
           bgColorOn    = node.properties.bgColorOn;

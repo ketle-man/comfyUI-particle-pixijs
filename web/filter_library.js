@@ -189,6 +189,131 @@ export const FILTER_CATALOG = {
                 ]},
 };
 
+// フィルターカタログのセクション定義（フィルタータブ・マルチタブのカタログ割り当てで共用）
+const FILTER_CATALOG_SECTIONS = [
+  ["basic", "sectionBasic"], ["extra", "sectionExtra"],
+  ["color", "sectionColor"], ["effects", "sectionEffects"],
+];
+
+// ---- カタログ一覧の汎用ビルダー ----
+// container にセクション見出し+フィルター項目を描画し、クリック時に onSelectType(key) を呼ぶ。
+// getActiveKey() は現在アクティブなフィルター種類キー（ホバー時のハイライト抑制・初期ハイライトに使用）。
+// 戻り値の highlight(activeKey) を呼ぶと選択中項目のスタイルを更新できる。
+function buildCatalogList(container, onSelectType, getActiveKey) {
+  const items = {};
+  for (const [secId, secKey] of FILTER_CATALOG_SECTIONS) {
+    container.appendChild(el("div", {
+      style: "font-size:10px;color:#556;padding:8px 10px 3px;letter-spacing:0.06em;font-weight:bold;",
+    }, t(secKey)));
+    for (const [key, def] of Object.entries(FILTER_CATALOG)) {
+      if (def.section !== secId) continue;
+      const item = el("div", {
+        style: "padding:7px 12px;cursor:pointer;font-size:12px;transition:background 0.1s;" +
+               "border-left:3px solid transparent;user-select:none;",
+      }, t(def.labelKey));
+      item.addEventListener("mouseenter", () => { if (getActiveKey() !== key) item.style.background = "#252545"; });
+      item.addEventListener("mouseleave", () => { if (getActiveKey() !== key) item.style.background = ""; });
+      item.addEventListener("click", () => onSelectType(key));
+      items[key] = item;
+      container.appendChild(item);
+    }
+  }
+  function highlight(activeKey) {
+    for (const [k, item] of Object.entries(items)) {
+      const sel = k === activeKey;
+      item.style.background      = sel ? "#2a2a5a" : "";
+      item.style.borderLeftColor = sel ? "#4a8adb" : "transparent";
+      item.style.color           = sel ? "#aaccff" : "#ccc";
+    }
+  }
+  return { items, highlight };
+}
+
+// ---- 指定フィルター種類のパラメータ値を解決 ----
+// candidates（{type, params} の配列、優先順）の中から type が一致する最初の値を採用し、
+// 見つからなければ定義上のデフォルト値を使う（フィルターの選び直し時に値を引き継ぐため）。
+function resolveParamsForType(key, def, candidates) {
+  const newParams = {};
+  for (const p of def.params) {
+    let val;
+    for (const cand of candidates) {
+      if (cand && cand.type === key && cand.params && cand.params[p.key] !== undefined) {
+        val = cand.params[p.key];
+        break;
+      }
+    }
+    newParams[p.key] = val !== undefined ? val : p.def;
+  }
+  return newParams;
+}
+
+// ---- フィルターのタイトル・説明文描画（共通） ----
+function renderFilterHeader(container, def) {
+  container.appendChild(el("div", {
+    style: "font-size:14px;font-weight:bold;color:#e0e0ff;padding-bottom:5px;" +
+           "border-bottom:1px solid #333;margin-bottom:4px;",
+  }, t(def.labelKey)));
+  container.appendChild(el("div", {
+    style: "font-size:11px;color:#778;margin-bottom:10px;",
+  }, t(def.descKey)));
+}
+
+// ---- パラメータ行（スライダー/カラーピッカー）の描画（共通） ----
+// getParam(key)/setParam(key, value) を通じて状態の読み書きとプレビュー通知を呼び出し側に委譲する。
+function renderParamRows(container, def, { getParam, setParam }) {
+  for (const p of def.params) {
+    const rowWrap = el("div", { style: "margin-bottom:10px;" });
+    rowWrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:3px;" }, t(p.labelKey)));
+
+    if (p.type === "color") {
+      const curVal   = getParam(p.key) ?? p.def;
+      const colorInp = document.createElement("input");
+      colorInp.type  = "color";
+      colorInp.value = typeof curVal === "string" ? curVal : p.def;
+      colorInp.style.cssText =
+        "width:100%;height:28px;border:1px solid #333;cursor:pointer;border-radius:4px;";
+      colorInp.addEventListener("input", () => {
+        setParam(p.key, colorInp.value);
+      });
+      rowWrap.appendChild(colorInp);
+    } else {
+      const curVal = getParam(p.key) ?? p.def;
+      const slRow  = el("div", { style: "display:flex;align-items:center;gap:6px;" });
+
+      const sl = document.createElement("input");
+      sl.type = "range"; sl.min = p.min; sl.max = p.max; sl.step = p.step; sl.value = curVal;
+      sl.style.cssText = "flex:1;height:14px;accent-color:#4a90d9;cursor:pointer;min-width:60px;";
+      sl.addEventListener("wheel", e => e.stopPropagation(), { passive: true });
+
+      const dec    = p.step < 0.1 ? 2 : (p.step < 1 ? 1 : 0);
+      const numInp = document.createElement("input");
+      numInp.type = "number"; numInp.min = p.min; numInp.max = p.max; numInp.step = p.step;
+      numInp.value = parseFloat(curVal).toFixed(dec);
+      numInp.style.cssText =
+        "width:56px;background:#111;border:1px solid #444;color:#ddd;" +
+        "padding:2px 5px;border-radius:4px;font-size:11px;text-align:right;" +
+        "appearance:textfield;-moz-appearance:textfield;";
+      numInp.addEventListener("wheel",   e => e.stopPropagation(), { passive: true });
+      numInp.addEventListener("keydown", e => e.stopPropagation());
+
+      const updateVal = v => setParam(p.key, v);
+      sl.addEventListener("input", () => {
+        const v = parseFloat(sl.value); numInp.value = v.toFixed(dec); updateVal(v);
+      });
+      numInp.addEventListener("change", () => {
+        let v = parseFloat(numInp.value);
+        if (isNaN(v)) { numInp.value = parseFloat(sl.value).toFixed(dec); return; }
+        v = Math.max(p.min, Math.min(p.max, v));
+        numInp.value = v.toFixed(dec); sl.value = v; updateVal(v);
+      });
+
+      slRow.append(sl, numInp);
+      rowWrap.appendChild(slRow);
+    }
+    container.appendChild(rowWrap);
+  }
+}
+
 // ---- エクスポート: ライブラリを開く ----
 // 拡張オプション（すべて省略可・省略時は従来動作）:
 //   topBar         : ヘッダーと3ペインの間に挿入する任意のコントロール行（外部SPAの統合UI用）
@@ -196,19 +321,28 @@ export const FILTER_CATALOG = {
 //                    この要素（ライブcanvas等）をそのまま表示する
 //   saveLabel      : 保存ボタンのラベル（既定: "✓ Apply & Close"）
 //   onClose        : クローズ時コールバック (saved: boolean) => void。保存/キャンセル問わず最後に呼ばれる
-export function openFilterLibrary({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview, topBar, previewElement, saveLabel, onClose }) {
+//   filterStack    : フィルタースタック配列 [{type, params, enabled}, ...]（単一フィルターは要素数1として表現）
+//   onLoadMultiPresets  : () => Promise<Array<{name, stack}>>  保存済みマルチプリセット一覧の取得
+//   onSaveMultiPreset   : (name, stack) => Promise<void>       プリセットの保存（同名なら上書き）
+//   onDeleteMultiPreset : (name) => Promise<void>              プリセットの削除
+export function openFilterLibrary({ mainCanvas, filterStack, particleSettings, onPreview, onSave, onParticlePreview, onLoadMultiPresets, onSaveMultiPreset, onDeleteMultiPreset, topBar, previewElement, saveLabel, onClose }) {
   if (document.getElementById("filter-lib-modal")) return;
   document.body.appendChild(
-    buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview, topBar, previewElement, saveLabel, onClose })
+    buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSave, onParticlePreview, onLoadMultiPresets, onSaveMultiPreset, onDeleteMultiPreset, topBar, previewElement, saveLabel, onClose })
   );
 }
 
 // ================================================================
 // モーダル構築
 // ================================================================
-function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, onSave, onParticlePreview, topBar = null, previewElement = null, saveLabel = null, onClose = null }) {
-  const origSettings = JSON.parse(JSON.stringify(filterSettings));
-  let   tempSettings = JSON.parse(JSON.stringify(filterSettings));
+function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSave, onParticlePreview, onLoadMultiPresets, onSaveMultiPreset, onDeleteMultiPreset, topBar = null, previewElement = null, saveLabel = null, onClose = null }) {
+  const origStack = JSON.parse(JSON.stringify(filterStack));
+  let   tempStack = JSON.parse(JSON.stringify(filterStack));
+  let   selectedRowIdx     = 0;     // マルチタブで選択/展開中の行インデックス
+  let   assigningRowIdx    = null;  // カタログ割り当てモード対象の行（null なら非カタログモード）
+  let   multiPresets       = [];    // [{name, stack}]
+  let   multiPresetsLoaded = false;
+  let   refreshMultiPanel  = () => {}; // buildMultiPanel() 実行後に差し替えられる再描画フック（Clearボタン用）
 
   const _defMotion = { turbulence: 0, turbFreq: 1, windX: 0, windY: 0, swirl: 0 };
   const origParticle = {
@@ -232,7 +366,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   let tempParticle = JSON.parse(JSON.stringify(origParticle));
   const notifyParticle = () => onParticlePreview?.(JSON.parse(JSON.stringify(tempParticle)));
 
-  let currentKey        = tempSettings.type || "none";
+  let currentKey        = tempStack.length === 1 ? (tempStack[0]?.type || "none") : null;
   let particleFileInput = null;
 
   // ---- Overlay ----
@@ -273,16 +407,21 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
            "border-right:1px solid #2a2a4a;background:#1a1a28;",
   });
 
-  // ---- タブバー（フィルター / パーティクル） ----
+  // ---- タブバー（フィルター / マルチ / パーティクル） ----
   let activeTab       = "filter";
-  let lastFilterKey   = tempSettings.type || "none";
   let lastParticleKey = "particle_settings";
+
+  const TAB_COLORS = {
+    filter:   { border: "#4a8adb", text: "#aaccff" },
+    multi:    { border: "#4ada7a", text: "#aaffcc" },
+    particle: { border: "#da8a4a", text: "#ffccaa" },
+  };
 
   const tabBar = el("div", {
     style: "display:flex;flex-shrink:0;border-bottom:1px solid #2a2a4a;background:#16213e;",
   });
   const tabBtns = {};
-  for (const [id, labelKey] of [["filter", "tabFilter"], ["particle", "tabParticle"]]) {
+  for (const [id, labelKey] of [["filter", "tabFilter"], ["multi", "tabMulti"], ["particle", "tabParticle"]]) {
     const btn = el("div", {
       style: "flex:1;text-align:center;padding:8px 2px;cursor:pointer;font-size:11px;" +
              "user-select:none;border-bottom:2px solid transparent;transition:background 0.1s;",
@@ -298,21 +437,28 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
 
   const filterListEl   = el("div");
   const particleListEl = el("div", { style: "display:none;" });
-  listScroll.append(filterListEl, particleListEl);
+  const multiListEl    = el("div", { style: "display:none;" });
+  listScroll.append(filterListEl, particleListEl, multiListEl);
 
   function setTab(id) {
     activeTab = id;
     for (const [k, btn] of Object.entries(tabBtns)) {
       const sel = k === id;
+      const c = TAB_COLORS[k];
       btn.style.background        = sel ? "#252545" : "";
-      btn.style.borderBottomColor = sel ? (k === "filter" ? "#4a8adb" : "#da8a4a") : "transparent";
-      btn.style.color             = sel ? (k === "filter" ? "#aaccff" : "#ffccaa") : "#888";
+      btn.style.borderBottomColor = sel ? c.border : "transparent";
+      btn.style.color             = sel ? c.text : "#888";
       btn.style.fontWeight        = sel ? "bold" : "normal";
     }
     filterListEl.style.display   = id === "filter"   ? "" : "none";
     particleListEl.style.display = id === "particle" ? "" : "none";
+    multiListEl.style.display    = id === "multi"    ? "" : "none";
     if (id === "filter") {
-      selectFilter(lastFilterKey);
+      showFilterTab();
+    } else if (id === "multi") {
+      assigningRowIdx = null;
+      buildMultiPanel();
+      showMultiPresetPane();
     } else if (lastParticleKey === "particle_params") {
       selectParticleParams();
     } else if (lastParticleKey === "particle_motion") {
@@ -323,25 +469,8 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   }
 
   // ---- フィルタータブ: フィルター一覧 ----
-  const filterItems = {};
-  for (const [secId, secKey] of [["basic", "sectionBasic"], ["extra", "sectionExtra"],
-                                 ["color", "sectionColor"], ["effects", "sectionEffects"]]) {
-    filterListEl.appendChild(el("div", {
-      style: "font-size:10px;color:#556;padding:8px 10px 3px;letter-spacing:0.06em;font-weight:bold;",
-    }, t(secKey)));
-    for (const [key, def] of Object.entries(FILTER_CATALOG)) {
-      if (def.section !== secId) continue;
-      const item = el("div", {
-        style: "padding:7px 12px;cursor:pointer;font-size:12px;transition:background 0.1s;" +
-               "border-left:3px solid transparent;user-select:none;",
-      }, t(def.labelKey));
-      item.addEventListener("mouseenter", () => { if (currentKey !== key) item.style.background = "#252545"; });
-      item.addEventListener("mouseleave", () => { if (currentKey !== key) item.style.background = ""; });
-      item.addEventListener("click", () => selectFilter(key));
-      filterItems[key] = item;
-      filterListEl.appendChild(item);
-    }
-  }
+  const { items: filterItems, highlight: highlightFilterCatalog } =
+    buildCatalogList(filterListEl, key => selectFilter(key), () => currentKey);
 
   // ---- パーティクルタブ: 設定項目 ----
   const particleItem = el("div", {
@@ -384,12 +513,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   particleListEl.appendChild(particleMotionItem);
 
   function highlightList(activeKey) {
-    for (const [k, item] of Object.entries(filterItems)) {
-      const sel = k === activeKey;
-      item.style.background      = sel ? "#2a2a5a" : "";
-      item.style.borderLeftColor = sel ? "#4a8adb" : "transparent";
-      item.style.color           = sel ? "#aaccff" : "#ccc";
-    }
+    highlightFilterCatalog(activeKey);
     const pSel = activeKey === "particle_settings";
     particleItem.style.background      = pSel ? "#2a2a5a" : "";
     particleItem.style.borderLeftColor = pSel ? "#da8a4a" : "transparent";
@@ -452,19 +576,13 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
            "background:#1a1a28;padding:10px 14px;display:flex;flex-direction:column;gap:0;",
   });
 
-  // ---- フィルターパラメータパネル ----
+  // ---- フィルターパラメータパネル（フィルタータブ、tempStack[0] を対象） ----
   function buildParamPanel(key) {
     rightPanel.replaceChildren();
     const def = FILTER_CATALOG[key];
     if (!def) return;
 
-    rightPanel.appendChild(el("div", {
-      style: "font-size:14px;font-weight:bold;color:#e0e0ff;padding-bottom:5px;" +
-             "border-bottom:1px solid #333;margin-bottom:4px;",
-    }, t(def.labelKey)));
-    rightPanel.appendChild(el("div", {
-      style: "font-size:11px;color:#778;margin-bottom:10px;",
-    }, t(def.descKey)));
+    renderFilterHeader(rightPanel, def);
 
     if (def.params.length === 0) {
       rightPanel.appendChild(
@@ -473,61 +591,13 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
       return;
     }
 
-    for (const p of def.params) {
-      const rowWrap = el("div", { style: "margin-bottom:10px;" });
-      rowWrap.appendChild(el("div", { style: "font-size:11px;color:#99a;margin-bottom:3px;" }, t(p.labelKey)));
-
-      if (p.type === "color") {
-        const curVal   = tempSettings.params[p.key] ?? p.def;
-        const colorInp = document.createElement("input");
-        colorInp.type  = "color";
-        colorInp.value = typeof curVal === "string" ? curVal : p.def;
-        colorInp.style.cssText =
-          "width:100%;height:28px;border:1px solid #333;cursor:pointer;border-radius:4px;";
-        colorInp.addEventListener("input", () => {
-          tempSettings.params[p.key] = colorInp.value;
-          onPreview(JSON.parse(JSON.stringify(tempSettings)));
-        });
-        rowWrap.appendChild(colorInp);
-      } else {
-        const curVal = tempSettings.params[p.key] ?? p.def;
-        const slRow  = el("div", { style: "display:flex;align-items:center;gap:6px;" });
-
-        const sl = document.createElement("input");
-        sl.type = "range"; sl.min = p.min; sl.max = p.max; sl.step = p.step; sl.value = curVal;
-        sl.style.cssText = "flex:1;height:14px;accent-color:#4a90d9;cursor:pointer;min-width:60px;";
-        sl.addEventListener("wheel", e => e.stopPropagation(), { passive: true });
-
-        const dec    = p.step < 0.1 ? 2 : (p.step < 1 ? 1 : 0);
-        const numInp = document.createElement("input");
-        numInp.type = "number"; numInp.min = p.min; numInp.max = p.max; numInp.step = p.step;
-        numInp.value = parseFloat(curVal).toFixed(dec);
-        numInp.style.cssText =
-          "width:56px;background:#111;border:1px solid #444;color:#ddd;" +
-          "padding:2px 5px;border-radius:4px;font-size:11px;text-align:right;" +
-          "appearance:textfield;-moz-appearance:textfield;";
-        numInp.addEventListener("wheel",   e => e.stopPropagation(), { passive: true });
-        numInp.addEventListener("keydown", e => e.stopPropagation());
-
-        const updateVal = v => {
-          tempSettings.params[p.key] = v;
-          onPreview(JSON.parse(JSON.stringify(tempSettings)));
-        };
-        sl.addEventListener("input", () => {
-          const v = parseFloat(sl.value); numInp.value = v.toFixed(dec); updateVal(v);
-        });
-        numInp.addEventListener("change", () => {
-          let v = parseFloat(numInp.value);
-          if (isNaN(v)) { numInp.value = parseFloat(sl.value).toFixed(dec); return; }
-          v = Math.max(p.min, Math.min(p.max, v));
-          numInp.value = v.toFixed(dec); sl.value = v; updateVal(v);
-        });
-
-        slRow.append(sl, numInp);
-        rowWrap.appendChild(slRow);
-      }
-      rightPanel.appendChild(rowWrap);
-    }
+    renderParamRows(rightPanel, def, {
+      getParam: k => tempStack[0].params[k],
+      setParam: (k, v) => {
+        tempStack[0].params[k] = v;
+        onPreview(JSON.parse(JSON.stringify(tempStack)));
+      },
+    });
   }
 
   // ---- パーティクル設定パネル（テクスチャ＋シェイプ） ----
@@ -1012,19 +1082,271 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
     }
   }
 
+  // ---- マルチタブ: 左ペイン（プリセット一覧 / カタログ割り当て） ----
+  const multiPresetListWrapEl = el("div");
+  const multiCatalogWrapEl    = el("div", { style: "display:none;" });
+  multiListEl.append(multiPresetListWrapEl, multiCatalogWrapEl);
+
+  const multiCatalogBackBtn = el("div", {
+    style: "padding:7px 12px;cursor:pointer;font-size:12px;color:#8ac0e0;" +
+           "border-bottom:1px solid #2a2a4a;margin-bottom:4px;user-select:none;",
+  }, "◀ " + t("backToPresetList"));
+  multiCatalogBackBtn.addEventListener("click", () => { assigningRowIdx = null; showMultiPresetPane(); });
+  const multiCatalogListEl = el("div");
+  multiCatalogWrapEl.append(multiCatalogBackBtn, multiCatalogListEl);
+
+  let multiCatalogBuilt      = false;
+  let highlightMultiCatalog  = null;
+
+  function showMultiPresetPane() {
+    multiCatalogWrapEl.style.display    = "none";
+    multiPresetListWrapEl.style.display = "";
+    loadMultiPresetsOnce().then(refreshMultiPresetList);
+  }
+  function showMultiCatalogPane() {
+    multiPresetListWrapEl.style.display = "none";
+    multiCatalogWrapEl.style.display    = "";
+  }
+
+  async function loadMultiPresetsOnce() {
+    if (multiPresetsLoaded) return;
+    multiPresetListWrapEl.replaceChildren(
+      el("div", { style: "font-size:11px;color:#667;padding:8px 10px;" }, t("loadingPresets"))
+    );
+    multiPresets = (await onLoadMultiPresets?.()) ?? [];
+    multiPresetsLoaded = true;
+  }
+
+  function refreshMultiPresetList() {
+    multiPresetListWrapEl.replaceChildren();
+    if (multiPresets.length === 0) {
+      multiPresetListWrapEl.appendChild(
+        el("div", { style: "font-size:11px;color:#667;padding:8px 10px;" }, t("multiPresetListEmpty"))
+      );
+      return;
+    }
+    for (const preset of multiPresets) {
+      const row = el("div", {
+        style: "display:flex;align-items:center;justify-content:space-between;gap:4px;" +
+               "padding:7px 12px;cursor:pointer;font-size:12px;user-select:none;",
+      });
+      const nameEl = el("span", {
+        style: "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
+      }, preset.name);
+      nameEl.addEventListener("click", () => loadMultiPreset(preset));
+      const delBtn = el("button", {
+        style: "background:none;border:none;color:#a66;cursor:pointer;font-size:13px;padding:0 4px;flex-shrink:0;",
+      }, "×");
+      delBtn.onclick = async e => {
+        e.stopPropagation();
+        if (!confirm(t("confirmDeletePreset", preset.name))) return;
+        await onDeleteMultiPreset?.(preset.name);
+        multiPresets = multiPresets.filter(p => p.name !== preset.name);
+        refreshMultiPresetList();
+      };
+      row.append(nameEl, delBtn);
+      multiPresetListWrapEl.appendChild(row);
+    }
+  }
+
+  function loadMultiPreset(preset) {
+    tempStack      = JSON.parse(JSON.stringify(preset.stack));
+    selectedRowIdx = 0;
+    assigningRowIdx = null;
+    showMultiPresetPane();
+    refreshMultiPanel();
+    onPreview(JSON.parse(JSON.stringify(tempStack)));
+  }
+
+  // ---- マルチタブ: 右ペイン（スタック編集UI） ----
+  function buildMultiPanel() {
+    rightPanel.replaceChildren();
+
+    rightPanel.appendChild(el("div", {
+      style: "font-size:14px;font-weight:bold;color:#aaffcc;padding-bottom:5px;" +
+             "border-bottom:1px solid #333;margin-bottom:4px;",
+    }, t("tabMulti")));
+    rightPanel.appendChild(el("div", {
+      style: "font-size:11px;color:#778;margin-bottom:10px;",
+    }, t("multiStackDesc")));
+
+    const stackListEl = el("div", {
+      style: "max-height:220px;overflow-y:auto;border:1px solid #2a2a4a;border-radius:4px;margin-bottom:10px;",
+    });
+    const multiParamAreaEl = el("div", { style: "margin-bottom:10px;" });
+    const toolbarEl = el("div", {
+      style: "display:flex;gap:4px;flex-wrap:wrap;border-top:1px solid #2a2a4a;padding-top:8px;",
+    });
+    rightPanel.append(stackListEl, multiParamAreaEl, toolbarEl);
+
+    function refreshStackList() {
+      stackListEl.replaceChildren();
+      tempStack.forEach((row, idx) => {
+        const rowEl = el("div", {
+          style: "display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;" +
+                 "border-bottom:1px solid #22223a;user-select:none;",
+        });
+        if (idx === selectedRowIdx) rowEl.style.background = "#2a2a5a";
+        const toggleTri = el("span", { style: "width:12px;flex-shrink:0;color:#8ac0e0;" },
+          idx === selectedRowIdx ? "▼" : "▶");
+        const chk = document.createElement("input");
+        chk.type = "checkbox";
+        chk.checked = row.enabled !== false;
+        chk.style.cssText = "width:14px;height:14px;cursor:pointer;accent-color:#4a90d9;flex-shrink:0;";
+        chk.addEventListener("click", e => e.stopPropagation());
+        chk.addEventListener("change", () => { row.enabled = chk.checked; notifyMultiPreview(); });
+        const label = el("span", {
+          style: "font-size:12px;color:#ccc;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
+        }, row.type === "none" ? t("clickToAssignFilter") : t(FILTER_CATALOG[row.type]?.labelKey ?? "filterNoneLabel"));
+        rowEl.append(toggleTri, chk, label);
+        rowEl.addEventListener("click", () => {
+          if (assigningRowIdx !== null) { assigningRowIdx = null; showMultiPresetPane(); }
+          selectedRowIdx = idx;
+          refreshStackList();
+          refreshMultiParamArea();
+        });
+        stackListEl.appendChild(rowEl);
+      });
+    }
+
+    function refreshMultiParamArea() {
+      multiParamAreaEl.replaceChildren();
+      const row = tempStack[selectedRowIdx];
+      if (!row || row.type === "none") {
+        multiParamAreaEl.appendChild(
+          el("div", { style: "color:#666;font-size:12px;padding:8px 0;" }, t("clickToAssignFilter"))
+        );
+        return;
+      }
+      const def = FILTER_CATALOG[row.type];
+      if (!def) return;
+      renderFilterHeader(multiParamAreaEl, def);
+      if (def.params.length === 0) {
+        multiParamAreaEl.appendChild(
+          el("div", { style: "color:#666;font-size:12px;padding:8px 0;" }, t("noParams"))
+        );
+        return;
+      }
+      renderParamRows(multiParamAreaEl, def, {
+        getParam: k => row.params[k],
+        setParam: (k, v) => { row.params[k] = v; notifyMultiPreview(); },
+      });
+    }
+
+    function notifyMultiPreview() {
+      onPreview(JSON.parse(JSON.stringify(tempStack)));
+    }
+
+    function enterCatalogAssignMode(rowIdx) {
+      assigningRowIdx = rowIdx;
+      showMultiCatalogPane();
+      if (!multiCatalogBuilt) {
+        const built = buildCatalogList(
+          multiCatalogListEl,
+          key => assignRowType(key),
+          () => (assigningRowIdx !== null ? tempStack[assigningRowIdx]?.type : null)
+        );
+        highlightMultiCatalog = built.highlight;
+        multiCatalogBuilt = true;
+      }
+      highlightMultiCatalog?.(tempStack[rowIdx].type);
+    }
+
+    function assignRowType(key) {
+      if (assigningRowIdx === null) return;
+      const def = FILTER_CATALOG[key];
+      if (!def) return;
+      const prevRow = tempStack[assigningRowIdx];
+      const newParams = resolveParamsForType(key, def, [prevRow]);
+      tempStack[assigningRowIdx] = { type: key, params: newParams, enabled: prevRow?.enabled ?? true };
+      highlightMultiCatalog?.(key);
+      selectedRowIdx = assigningRowIdx;
+      refreshStackList();
+      refreshMultiParamArea();
+      notifyMultiPreview();
+    }
+
+    const addBtn = mkBtn("+", "#3a5a3a");
+    addBtn.title = t("addFilterRow");
+    addBtn.onclick = () => {
+      tempStack.push({ type: "none", params: {}, enabled: true });
+      selectedRowIdx = tempStack.length - 1;
+      refreshStackList();
+      refreshMultiParamArea();
+      enterCatalogAssignMode(selectedRowIdx);
+    };
+
+    const removeBtn = mkBtn("−", "#5a3a3a");
+    removeBtn.title = t("removeFilterRow");
+    removeBtn.onclick = () => {
+      if (tempStack.length <= 1) return;
+      tempStack.splice(selectedRowIdx, 1);
+      selectedRowIdx = Math.max(0, Math.min(selectedRowIdx, tempStack.length - 1));
+      refreshStackList();
+      refreshMultiParamArea();
+      notifyMultiPreview();
+    };
+
+    const upBtn = mkBtn("▲", "#3a3a5a");
+    upBtn.title = t("moveFilterUp");
+    upBtn.onclick = () => {
+      if (selectedRowIdx <= 0) return;
+      [tempStack[selectedRowIdx - 1], tempStack[selectedRowIdx]] = [tempStack[selectedRowIdx], tempStack[selectedRowIdx - 1]];
+      selectedRowIdx--;
+      refreshStackList();
+      notifyMultiPreview();
+    };
+    const downBtn = mkBtn("▼", "#3a3a5a");
+    downBtn.title = t("moveFilterDown");
+    downBtn.onclick = () => {
+      if (selectedRowIdx >= tempStack.length - 1) return;
+      [tempStack[selectedRowIdx + 1], tempStack[selectedRowIdx]] = [tempStack[selectedRowIdx], tempStack[selectedRowIdx + 1]];
+      selectedRowIdx++;
+      refreshStackList();
+      notifyMultiPreview();
+    };
+
+    const savePresetBtn = mkBtn(t("savePreset"), "#3a5a7a");
+    savePresetBtn.onclick = async () => {
+      const name = prompt(t("presetNamePrompt"), "");
+      if (!name) return;
+      const stackCopy = JSON.parse(JSON.stringify(tempStack));
+      await onSaveMultiPreset?.(name, stackCopy);
+      const idx = multiPresets.findIndex(p => p.name === name);
+      const entry = { name, stack: stackCopy };
+      if (idx >= 0) multiPresets[idx] = entry; else multiPresets.push(entry);
+      refreshMultiPresetList();
+    };
+
+    toolbarEl.append(addBtn, removeBtn, upBtn, downBtn, savePresetBtn);
+
+    refreshMultiPanel = () => { refreshStackList(); refreshMultiParamArea(); };
+    refreshStackList();
+    refreshMultiParamArea();
+  }
+
   // ---- Footer ----
   const footer = el("div", {
     style: "display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 14px;" +
            "background:#16213e;border-top:1px solid #333;flex-shrink:0;",
   });
+  const clearBtn = mkBtn(t("clearFilters"), "#7a5a2a");
+  clearBtn.onclick = () => {
+    if (tempStack.length > 1) {
+      tempStack.length = 1;
+      selectedRowIdx = 0;
+      refreshMultiPanel();
+      onPreview(JSON.parse(JSON.stringify(tempStack)));
+    }
+  };
   const cancelBtn = mkBtn(t("cancel"), "#4a4a4a");
   cancelBtn.onclick = () => cleanup(false);
   const saveBtn = mkBtn(saveLabel ?? t("applyAndClose"), "#3a7a3a");
   saveBtn.onclick = () => {
-    onSave(JSON.parse(JSON.stringify(tempSettings)), { ...tempParticle });
+    onSave(JSON.parse(JSON.stringify(tempStack)), { ...tempParticle });
     cleanup(true);
   };
-  footer.append(cancelBtn, saveBtn);
+  footer.append(clearBtn, cancelBtn, saveBtn);
 
   // ---- 組み立て ----
   body.append(leftPanel, centerPanel, rightPanel);
@@ -1032,24 +1354,33 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   else        dialog.append(header, body, footer);
   overlay.appendChild(dialog);
 
-  // ---- フィルター選択 ----
+  // ---- フィルタータブ表示（非破壊: クリックするまでスタックは変更しない） ----
+  function showFilterTab() {
+    if (tempStack.length === 1) {
+      currentKey = tempStack[0].type;
+      highlightList(currentKey);
+      buildParamPanel(currentKey);
+    } else {
+      currentKey = null;
+      highlightList(null);
+      rightPanel.replaceChildren();
+      rightPanel.appendChild(el("div", {
+        style: "color:#889;font-size:12px;padding:12px 4px;line-height:1.6;",
+      }, t("clickToAssignFilter")));
+    }
+  }
+
+  // ---- フィルター選択（カタログクリック時のみ呼ばれる: スタック全体を1エントリで置き換える） ----
   function selectFilter(key) {
     const def = FILTER_CATALOG[key];
     if (!def) return;
-    currentKey    = key;
-    lastFilterKey = key;
-    const newParams = {};
-    for (const p of def.params) {
-      newParams[p.key] = (key === origSettings.type && origSettings.params[p.key] !== undefined)
-        ? origSettings.params[p.key]
-        : (tempSettings.type === key && tempSettings.params[p.key] !== undefined)
-          ? tempSettings.params[p.key]
-          : p.def;
-    }
-    tempSettings = { type: key, params: newParams };
+    currentKey = key;
+    const newParams = resolveParamsForType(key, def, [origStack[0], tempStack[0]]);
+    tempStack = [{ type: key, params: newParams, enabled: true }];
+    selectedRowIdx = 0;
     highlightList(key);
     buildParamPanel(key);
-    onPreview(JSON.parse(JSON.stringify(tempSettings)));
+    onPreview(JSON.parse(JSON.stringify(tempStack)));
   }
 
   function selectParticle() {
@@ -1077,7 +1408,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   function cleanup(saved) {
     if (rafId) cancelAnimationFrame(rafId);
     if (!saved) {
-      onPreview(origSettings);
+      onPreview(origStack);
       onParticlePreview?.(null);
     }
     overlay.remove();
@@ -1085,7 +1416,7 @@ function buildModal({ mainCanvas, filterSettings, particleSettings, onPreview, o
   }
 
   // ---- 初期化 ----
-  setTab("filter");
+  setTab(tempStack.length > 1 ? "multi" : "filter");
   startPreviewLoop();
   requestAnimationFrame(() => overlay.focus());
 
