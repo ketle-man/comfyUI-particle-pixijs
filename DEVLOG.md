@@ -1279,3 +1279,38 @@ comic-creater SPA のモーダル統合のため、`openFilterLibrary` / `buildM
 - `onClose(saved)` — クローズ時コールバック（保存/キャンセル問わず最後に呼ばれる）
 
 cleanup は rafId が無い場合の cancelAnimationFrame をガードし、最後に `onClose?.(saved)` を呼ぶ。
+
+---
+
+## セッション 14
+
+### マルチフィルター機能の追加（複数フィルターの重ね掛け・並び替え・プリセット保存）
+
+**目的**: フィルターを1種類しか選べなかったのを、複数フィルターを重ねて適用し、その組み合わせをプリセット（レシピ）として保存・再利用できるようにしたい、というユーザー依頼。
+
+**データモデル**: 単一フィルター（`{type, params}`）とマルチフィルターを別データとして扱う設計は不要という方針のもと、`filterStack`（`[{type, params, enabled}, ...]` 配列）に統合。単一フィルターは要素数1のスタックにすぎない。`node.properties.filterSettings`（旧形式）は `node.properties.filterStack` に置き換え、既存ワークフローとの互換性は考慮しない（画像ごとに最適な設定は異なり引き継ぐ価値がないとユーザーが判断）。
+
+**UI設計**（Nik Collection の Color Efex Pro を参考に、複数回のフィードバックを経て以下に収束）:
+- 右ペインは常に「フィルタースタック編集UI」（行リスト＋展開パラメータ＋ `+ - ▲ ▼ 保存` ツールバー）を表示し、左のタブによる右ペイン切り替えを廃止
+- 左ペイン「フィルター」タブ＝常時表示のカタログ一覧。クリックすると選択中の行に即座に型を割り当て、カタログ画面のまま留まる（選び直しが1クリックで完結）
+- 左ペイン「マルチ」タブ＝保存済みプリセット（レシピ）一覧専用。読み込みは現在のスタックを**上書き**するため確認ダイアログを挟む
+- ツールバーの「+」は自動的に「フィルター」タブへ切り替える（タブを手動で押す手間を排除）
+- フッターに「Clear」ボタンを追加（1つ目のフィルター以外を全削除）
+
+**永続化**: プリセットは ComfyUI の userdata API（`api.storeUserData`/`getUserData`/`deleteUserData`）で `Particle Renderer (PixiJS)/multi_filter_presets.json` に保存。
+
+**適用ロジック**: `particle_widget.js` の `applyFilter()` を、スタック内の有効な行を順に `makeFilterInstance()` で生成し、`SCENE_WIDE_FILTERS`（godray等）とレイヤー系フィルターとで適用先コンテナ（`pixiApp.stage` / `particleLayer` / `bgSprite`）を振り分ける汎用ロジックに刷新。要素数1のスタックでは旧・単一フィルター時と完全に同じ挙動になることを確認済み。
+
+**検証**: 実機ComfyUI + Playwrightで、＋追加→カタログ選択→スタック反映、チェックボックスでのON/OFF、▲▼並び替え、プリセット保存→サーバー永続化確認（`/api/userdata/...` へのPOSTを確認）→再読み込み→一覧反映→選択で上書き確認、Apply&Closeでの `node.properties.filterStack` 永続化とワークフロー再読み込みでの復元、をひと通り確認。
+
+### Glitch フィルターが Play/Stop&Capture のたびに見た目が変わる問題の修正
+
+**原因**: PixiJS の `GlitchFilter` は内部でスライス配置を `Math.random()` で生成しており、公開されている `seed` オプションは色ズレ量の計算にのみ使われスライス配置には影響しない（pixi-filters 側の仕様）。`makeFilterInstance()` は呼ぶたびに新規インスタンスを生成する設計のため、同じパラメータでも毎回異なる乱数列で描画されていた。
+
+**修正**: `particle_engine.js` に決定論的な疑似乱数生成器（mulberry32）を追加し、`slices`/`offset`/`direction` から導出したシードで、`GlitchFilter` 生成中だけ `Math.random` を一時的に差し替える。生成は同期処理のため差し替え・復元も安全に完結する。実機で `_sizes`/`_offsets`（内部のスライス配置データ）を比較し、同一パラメータで完全一致・異なるパラメータで不一致になることを確認。
+
+### 外部SPA（comfyui-comic-creater）との連携修正
+
+上記の `openFilterLibrary()` API変更（`filterSettings`→`filterStack`）は破壊的変更であり、外部からの再利用元である `comfyui-comic-creater` リポジトリの `static/js/pixifx.js` がこれに追従できずクラッシュする状態になっていた。同リポジトリ側で `pixifx.js` を新APIに追従させる修正を行い、v1.41.0としてリリース済み（詳細は同リポジトリの DEVLOG.md 参照）。
+
+**教訓**: セッション13の「注意」で言及した通り、`particle_engine.js`/`filter_library.js` の公開APIを変更する際は、外部SPA側の呼び出し元も同時に確認・修正する必要がある。
