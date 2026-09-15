@@ -1314,3 +1314,25 @@ cleanup は rafId が無い場合の cancelAnimationFrame をガードし、最�
 上記の `openFilterLibrary()` API変更（`filterSettings`→`filterStack`）は破壊的変更であり、外部からの再利用元である `comfyui-comic-creater` リポジトリの `static/js/pixifx.js` がこれに追従できずクラッシュする状態になっていた。同リポジトリ側で `pixifx.js` を新APIに追従させる修正を行い、v1.41.0としてリリース済み（詳細は同リポジトリの DEVLOG.md 参照）。
 
 **教訓**: セッション13の「注意」で言及した通り、`particle_engine.js`/`filter_library.js` の公開APIを変更する際は、外部SPA側の呼び出し元も同時に確認・修正する必要がある。
+
+---
+
+## セッション 15
+
+### i18n を comfyui-prompt-feeder と同形式に変更 + 外部SPA（comfyui-comic-creator）の言語への自動追従
+
+**目的**: `web/i18n.js` を、姉妹プロジェクト `comfyui-prompt-feeder`（`js/i18n.js`）と同じ API 形状（`LANG_OPTIONS` / `getLang()` / `setLang()` を export し、選択言語を localStorage に永続化）に揃える。あわせて、`eagle_comic_creator_spa`（comfyui-comic-creator）のレイアウトタブ／Image タブから本ノードのフィルタライブラリを開いた際、SPA 側の言語設定（`ccc_ui_lang`）に自動追従して表示する。
+
+**`web/i18n.js` 変更**:
+- `STORAGE_KEY = "comfyui-particle-pixijs.lang"` を新設し、`LANG_OPTIONS`（en/ja/zh）・`getLang()`・`setLang()`・`isHostControlledLang()` を新規 export。
+- 言語決定を単発の `detectLanguage()` から、呼び出しごとに評価する `getLang()` に変更。優先順位は「①連携先SPAが `window.getLang` をグローバル公開していれば常にそれに追従（SPA側の言語設定が最優先＝常時追従の仕様） → ② localStorage の保存値（ComfyUI単体利用時のユーザー選択） → ③ Comfy.Locale 設定 → ④ navigator.language → ⑤ en」。
+- `comfyui-comic-creator` の `static/js/i18n.js` が `window.t/getLang/setLang/...` をグローバルブリッジとして公開している（ESM移行中の一時措置）ことを利用し、同一 window で動的 import される本モジュールから直接 `window.getLang()` を検出する形にした（SPA側の変更は不要）。
+
+**`web/filter_library.js` 変更**:
+- フィルタライブラリモーダルのヘッダーに `LANG_OPTIONS` を使った言語セレクタ（`<select>`）を追加。選択すると `setLang()` → 現在の一時状態（`tempStack`/`tempParticle`、選択中タブ等）を引き継いだまま `buildModal()` を直接呼び直して同モーダルを再構築する（`cleanup()` 経由だとキャンセル扱いでプレビューが元に戻るため使わない。`openFilterLibrary()` は `#filter-lib-modal` の存在チェックで二重起動を弾くため、再オープンは内部の `buildModal()` を直接呼ぶ）。
+- `isHostControlledLang()`（`window.getLang` が定義されているか）が true の場合、すなわち comfyui-comic-creator から開かれている場合はセレクタ自体を出さず、SPA側の言語設定に完全に追従する。
+
+**検証**: 実機ComfyUI + Kaptureで、Setting → フィルタ&パーティクル設定モーダルを開き、ヘッダーのセレクタで日本語に切替 → 即座に全UI文言が日本語化されタブ選択状態も保持されることを確認。さらに `window.getLang = () => 'zh'` を注入して comfyui-comic-creator 環境を模擬し、モーダルが自動的に中国語表示になりセレクタが非表示になることを確認。
+
+**インストール先同期**: `robocopy web <ComfyUI_6>/custom_nodes/comfyUI-particle-pixijs/web /E /XF *.bak` で反映済み。
+

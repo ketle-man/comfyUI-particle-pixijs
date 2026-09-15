@@ -4,7 +4,7 @@
  * - パーティクルテクスチャ・回転設定
  */
 
-import { t } from "./i18n.js";
+import { t, getLang, setLang, LANG_OPTIONS, isHostControlledLang } from "./i18n.js";
 
 // ---- フィルターカタログ (全定義) ----
 // label/desc は i18n キーに変更。section は内部コード "basic"/"extra" に統一。
@@ -394,8 +394,41 @@ function buildModal({ mainCanvas, filterStack, particleSettings, onPreview, onSa
     el("span", { style: "font-size:15px;font-weight:bold;color:#e0e0ff;flex:1;" },
        t("filterLibraryHeader")),
     el("span", { style: "font-size:11px;color:#666;" }, t("escapeToCancel")),
-    mkCloseBtn(() => cleanup(false))
   );
+  // 連携先SPA（comfyui-comic-creator）から開いている場合はSPA側の言語設定に常時追従するため
+  // セレクタ自体を出さない。ComfyUI単体利用時のみ、この場で明示的に言語を切り替えられる。
+  if (!isHostControlledLang()) {
+    const langSelect = el("select", {
+      style: "background:#2a2a3a;color:#ccc;border:1px solid #444;border-radius:4px;" +
+             "font-size:11px;padding:2px 4px;cursor:pointer;",
+    });
+    for (const opt of LANG_OPTIONS) {
+      const optEl = document.createElement("option");
+      optEl.value = opt.value;
+      optEl.textContent = opt.label;
+      langSelect.appendChild(optEl);
+    }
+    langSelect.value = getLang();
+    langSelect.addEventListener("change", () => {
+      setLang(langSelect.value);
+      // 状態(tempStack/tempParticle)を引き継いだまま同モーダルを言語切替後の表示で開き直す
+      // （cleanup()経由だとキャンセル扱いでプレビューが元に戻ってしまうため使わない。
+      //  openFilterLibrary()はfilter-lib-modal存在チェックで二重起動を弾くので、
+      //  overlay除去直後でもガードに引っかからないよう内部のbuildModal()を直接呼ぶ）。
+      if (rafId) cancelAnimationFrame(rafId);
+      overlay.remove();
+      document.body.appendChild(buildModal({
+        mainCanvas,
+        filterStack: JSON.parse(JSON.stringify(tempStack)),
+        particleSettings: JSON.parse(JSON.stringify(tempParticle)),
+        onPreview, onSave, onParticlePreview,
+        onLoadMultiPresets, onSaveMultiPreset, onDeleteMultiPreset,
+        topBar, previewElement, saveLabel, onClose,
+      }));
+    });
+    header.append(langSelect);
+  }
+  header.append(mkCloseBtn(() => cleanup(false)));
 
   // ---- Body (3カラム) ----
   const body = el("div", { style: "display:flex;flex:1;overflow:hidden;" });

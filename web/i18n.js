@@ -1,6 +1,17 @@
 // 注意: このモジュールは ComfyUI フロントエンド外（外部SPA）からも import されるため、
 // scripts/app.js を静的 import しないこと。ComfyUI 内では window.comfyAPI 経由で
 // ロケール設定を参照し、それ以外は navigator.language にフォールバックする。
+//
+// 言語決定の優先順位（getLang() 参照）:
+//   1. 連携先 SPA（comfyui-comic-creator）が window.getLang を公開している場合は常にそれに追従
+//      （SPA 側の言語設定を最優先。ユーザーが手動選択しても上書きされる＝常時追従の仕様）
+//   2. localStorage に保存済みのユーザー選択（setLang() で保存。ComfyUI 単体利用時のみ意味を持つ）
+//   3. ComfyUI の Comfy.Locale 設定
+//   4. ブラウザの navigator.language
+//   5. "en"
+//
+// API 形状は comfyui-prompt-feeder の js/i18n.js に合わせている
+// （LANG_OPTIONS / getLang() / setLang() を export し、選択言語を localStorage に永続化）。
 
 const TRANSLATIONS = {
   en: {
@@ -568,7 +579,28 @@ const TRANSLATIONS = {
   },
 };
 
-function detectLanguage() {
+const STORAGE_KEY = "comfyui-particle-pixijs.lang";
+
+export const LANG_OPTIONS = [
+  { value: "en", label: "English" },
+  { value: "ja", label: "日本語" },
+  { value: "zh", label: "中文（简体）" },
+];
+
+// 連携先 SPA（comfyui-comic-creator の static/js/i18n.js）が window.getLang を
+// グローバル公開している場合、そのウィンドウ上で動的 import された本モジュールからも
+// 同じ window スコープで直接参照できる。SPA 側の言語設定に常時追従させるための検出。
+function detectHostLang() {
+  try {
+    if (typeof window.getLang === "function") {
+      const lang = window.getLang();
+      if (lang in TRANSLATIONS) return lang;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function detectComfyLocale() {
   try {
     // ComfyUI フロントエンド内なら window.comfyAPI（新）/ window.app（旧）から設定を参照
     const app = window.comfyAPI?.app?.app ?? window.app;
@@ -579,6 +611,10 @@ function detectLanguage() {
       if (code in TRANSLATIONS) return code;
     }
   } catch (_) {}
+  return null;
+}
+
+function detectBrowserLang() {
   const langs = navigator.languages?.length
     ? Array.from(navigator.languages)
     : [navigator.language ?? "en"];
@@ -587,12 +623,43 @@ function detectLanguage() {
     if (code === "zh") return "zh";
     if (code in TRANSLATIONS) return code;
   }
-  return "en";
+  return null;
 }
 
-const _lang = detectLanguage();
+function loadStoredLang() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved in TRANSLATIONS) return saved;
+  } catch (_) {}
+  return null;
+}
+
+// 連携先 SPA 内で動作しているか（= SPA の言語設定に常時追従すべきか）の判定。
+// フィルタライブラリのヘッダーに言語セレクタを出すかどうかの判断にも使う。
+export function isHostControlledLang() {
+  return typeof window.getLang === "function";
+}
+
+export function getLang() {
+  return (
+    detectHostLang() ??
+    loadStoredLang() ??
+    detectComfyLocale() ??
+    detectBrowserLang() ??
+    "en"
+  );
+}
+
+export function setLang(lang) {
+  if (!(lang in TRANSLATIONS)) return getLang();
+  try {
+    localStorage.setItem(STORAGE_KEY, lang);
+  } catch (_) {}
+  return getLang();
+}
 
 export function t(key, ...args) {
-  const val = TRANSLATIONS[_lang]?.[key] ?? TRANSLATIONS.en[key] ?? key;
+  const lang = getLang();
+  const val = TRANSLATIONS[lang]?.[key] ?? TRANSLATIONS.en[key] ?? key;
   return typeof val === "function" ? val(...args) : val;
 }
