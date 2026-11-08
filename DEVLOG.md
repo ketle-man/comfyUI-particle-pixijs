@@ -1336,3 +1336,17 @@ cleanup は rafId が無い場合の cancelAnimationFrame をガードし、最�
 
 **インストール先同期**: `robocopy web <ComfyUI_6>/custom_nodes/comfyUI-particle-pixijs/web /E /XF *.bak` で反映済み。
 
+
+---
+
+## 2026-11-08 — v1.7.1（hotfix: Web 配信パスをインストール先フォルダ名の大小文字に依存させない）
+
+※ feature/particle-controls-and-image-drop ブランチ（セッション16〜18）とは別に、master から直接リリースした修正。
+
+**症状**: Comfy Registry / ComfyUI-Manager 経由で入れ直したところ、comfyui-comic-creator の PixiJS FX が「カスタムノード comfyUI-particle-pixijs の読み込みに失敗しました」で開けなくなった。
+
+**原因**: ComfyUI は `WEB_DIRECTORY` を**インストール先のフォルダ名**で `/extensions/<フォルダ名>/` に配信し、aiohttp のルートは大文字小文字を区別する。レジストリ経由だとフォルダ名が小文字の `comfyui-particle-pixijs` になり、git clone だとリポジトリ名どおりの `comfyUI-particle-pixijs` になる。外部SPA（comfyui-comic-creator の `pixifx.js`）は `/extensions/comfyUI-particle-pixijs/` を固定で import していたため 404 になった。
+
+**修正**: `pyproject.toml` の `[tool.comfy]` に `web = "web"` を追加。ComfyUI（`nodes.py` の `config_parser.extract_node_configuration`）はこの指定があると、フォルダ名とは別に `[project].name`（常に小文字の `comfyui-particle-pixijs`）でも web フォルダを登録する。これで、どちらの方法で入れても `/extensions/comfyui-particle-pixijs/` が必ず存在する（git clone の場合は従来の `comfyUI-` の URL も併存）。comfyui-comic-creator 側も、小文字の URL を先に試して従来の URL にフォールバックするよう修正した（v1.68.1）。
+
+**How to apply**: 外部から本ノードの JS を参照する場合は `/extensions/comfyui-particle-pixijs/`（小文字）を使う。`[project].name` を変更すると外部連携の URL が変わるので注意。
